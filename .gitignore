@@ -1,0 +1,47 @@
+# ── Secrets & local config ──
+# The real config contains the FritzBox password and your contract values.
+# Copy config/config.example.yaml to config/config.yaml and fill it in.
+config/config.yaml
+
+# ── Runtime data ──
+# Ignore the contents of these directories but keep the directories
+# themselves (via .gitkeep) so a fresh clone has the expected structure.
+database/*
+!database/.gitkeep
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+reports/*
+!reports/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.pdf
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+venv/
+.venv/
+env/
+ENV/
+
+# ── Editors / OS ──
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# ── Backups ──
+*.bak
+*.orig
+netwatch-backups/

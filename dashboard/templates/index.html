@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetWatch · {{ hostname }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #080B10;
+  --s1:       #0D1117;
+  --s2:       #131920;
+  --s3:       #1A2232;
+  --border:   #1E2D40;
+  --border2:  #243344;
+  --cyan:     #00D4FF;
+  --cyan-dim: rgba(0,212,255,.12);
+  --cyan-mid: rgba(0,212,255,.25);
+  --green:    #00FF88;
+  --green-dim:rgba(0,255,136,.1);
+  --red:      #FF4560;
+  --red-dim:  rgba(255,69,96,.12);
+  --orange:   #FF9F43;
+  --yellow:   #FFD93D;
+  --purple:   #A855F7;
+  --text:     #C9D5E3;
+  --text2:    #6B7E95;
+  --text3:    #3D5166;
+  --mono:     'JetBrains Mono', monospace;
+  --sans:     'Inter', system-ui, sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;min-height:100vh;overflow-x:hidden}
+
+/* ── HEADER ── */
+header {
+  position:sticky;top:0;z-index:100;
+  background:rgba(8,11,16,.85);
+  backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+  padding:0 28px;
+  display:flex;align-items:center;justify-content:space-between;
+  height:56px;
+}
+.logo {
+  display:flex;align-items:center;gap:10px;
+}
+.logo-mark {
+  width:32px;height:32px;
+  background:linear-gradient(135deg,var(--cyan),#0099BB);
+  border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:700;color:#080B10;
+  letter-spacing:-.5px;
+  box-shadow:0 0 16px rgba(0,212,255,.3);
+}
+.logo-text {font-size:16px;font-weight:600;color:#E8F4FF;letter-spacing:.2px}
+.logo-host {font-size:11px;color:var(--text3);font-family:var(--mono);margin-left:4px;font-weight:400}
+.header-right{display:flex;align-items:center;gap:16px}
+#last-updated{font-size:11px;color:var(--text3);font-family:var(--mono)}
+#status-badge {
+  display:flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:20px;
+  font-size:11px;font-weight:600;letter-spacing:.8px;
+  transition:all .3s;
+}
+#status-badge .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.badge-ok{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.badge-ok .dot{background:var(--green);box-shadow:0 0 6px var(--green);animation:blink 2s infinite}
+.badge-problem{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,69,96,.3)}
+.badge-problem .dot{background:var(--red);animation:pulse-dot 1s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes pulse-dot{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.4);opacity:.7}}
+
+/* ── NAV ── */
+nav{
+  background:var(--s1);
+  border-bottom:1px solid var(--border);
+  display:flex;gap:0;overflow-x:auto;padding:0 20px;
+  scrollbar-width:none;
+}
+nav::-webkit-scrollbar{display:none}
+nav button{
+  padding:14px 18px;background:none;border:none;
+  color:var(--text2);cursor:pointer;
+  font-size:12px;font-weight:500;
+  border-bottom:2px solid transparent;
+  white-space:nowrap;font-family:var(--sans);
+  transition:color .15s,border-color .15s;
+  letter-spacing:.3px;
+}
+nav button:hover{color:var(--text)}
+nav button.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+
+/* ── LAYOUT ── */
+main{padding:24px 28px;max-width:1440px;margin:0 auto}
+.page{display:none}
+.page.active{display:block}
+.grid{display:grid;gap:16px}
+.g4{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+
+/* ── CARDS ── */
+.card{
+  background:var(--s1);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:20px;
+  position:relative;overflow:hidden;
+}
+.card::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(255,255,255,.018) 0%,transparent 60%);
+  pointer-events:none;border-radius:inherit;
+}
+.card-label{
+  font-size:10px;font-weight:600;
+  color:var(--text3);letter-spacing:1.2px;
+  text-transform:uppercase;margin-bottom:10px;
+}
+.big-num{
+  font-size:36px;font-weight:700;
+  line-height:1;font-family:var(--mono);
+  letter-spacing:-1px;
+}
+.big-num.c-green{color:var(--green)}
+.big-num.c-red{color:var(--red)}
+.big-num.c-orange{color:var(--orange)}
+.big-num.c-cyan{color:var(--cyan)}
+.big-num.c-muted{color:var(--text2)}
+.card-sub{font-size:11px;color:var(--text2);margin-top:6px;font-family:var(--mono)}
+
+/* ── AVAILABILITY RING ── */
+.avail-card{display:flex;align-items:center;gap:20px}
+.ring-wrap{position:relative;flex-shrink:0}
+.ring-wrap svg{display:block}
+.ring-center{
+  position:absolute;inset:0;display:flex;
+  flex-direction:column;align-items:center;justify-content:center;
+}
+.ring-pct{font-size:14px;font-weight:700;font-family:var(--mono);color:var(--green);line-height:1;letter-spacing:-.5px}
+.ring-label{font-size:8px;color:var(--text3);letter-spacing:.8px;margin-top:3px;text-transform:uppercase}
+
+/* ── ALERT BANNER ── */
+.alert-banner{
+  display:none;
+  background:rgba(255,69,96,.07);
+  border:1px solid rgba(255,69,96,.25);
+  border-radius:10px;padding:12px 16px;
+  margin-bottom:20px;
+  align-items:center;gap:10px;
+  animation:fadeIn .3s ease;
+}
+.alert-banner .pulse-ring{
+  width:12px;height:12px;border-radius:50%;
+  background:var(--red);flex-shrink:0;
+  box-shadow:0 0 0 0 rgba(255,69,96,.4);
+  animation:ring-pulse 1.2s infinite;
+}
+@keyframes ring-pulse{
+  0%{box-shadow:0 0 0 0 rgba(255,69,96,.4)}
+  70%{box-shadow:0 0 0 8px rgba(255,69,96,0)}
+  100%{box-shadow:0 0 0 0 rgba(255,69,96,0)}
+}
+.alert-text{font-size:13px;color:var(--red);font-weight:500}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+/* ── TABLES ── */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{
+  background:var(--s2);color:var(--text3);
+  font-weight:600;text-align:left;
+  padding:9px 12px;border-bottom:1px solid var(--border);
+  font-size:10px;text-transform:uppercase;letter-spacing:.8px;
+  white-space:nowrap;
+}
+td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+.mono{font-family:var(--mono);font-size:11px}
+
+/* ── BADGES ── */
+.badge{
+  padding:3px 9px;border-radius:20px;
+  font-size:10px;font-weight:600;
+  display:inline-block;letter-spacing:.4px;white-space:nowrap;
+}
+.b-isp   {background:rgba(255,69,96,.15);color:var(--red);border:1px solid rgba(255,69,96,.2)}
+.b-local {background:rgba(255,159,67,.15);color:var(--orange);border:1px solid rgba(255,159,67,.2)}
+.b-dns   {background:rgba(255,217,61,.15);color:var(--yellow);border:1px solid rgba(255,217,61,.2)}
+.b-latency{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,212,255,.2)}
+.b-packet{background:rgba(168,85,247,.15);color:var(--purple);border:1px solid rgba(168,85,247,.2)}
+.b-routing{background:rgba(20,184,166,.15);color:#2DD4BF;border:1px solid rgba(20,184,166,.2)}
+.b-ok    {background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.2)}
+
+/* ── IP CHIP ── */
+.ip-chip{
+  background:var(--s2);border:1px solid var(--border2);
+  border-radius:6px;padding:3px 9px;
+  font-family:var(--mono);font-size:11px;
+  color:var(--cyan);display:inline-block;
+}
+
+/* ── SECTION HEADER ── */
+.section-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.section-hd h2{font-size:15px;font-weight:600;color:var(--text)}
+.row{display:flex;gap:10px;align-items:center}
+select,input{
+  background:var(--s2);border:1px solid var(--border2);
+  color:var(--text);border-radius:7px;
+  padding:6px 10px;font-size:12px;font-family:var(--sans);
+  outline:none;cursor:pointer;
+}
+select:focus,input:focus{border-color:var(--cyan)}
+
+/* ── PRE ── */
+pre{
+  background:var(--s2);border:1px solid var(--border);
+  border-radius:8px;padding:14px;
+  font-family:var(--mono);font-size:11px;
+  overflow:auto;white-space:pre-wrap;word-break:break-all;
+  max-height:320px;color:var(--text);line-height:1.6;
+}
+
+/* ── EMPTY STATE ── */
+.empty{
+  padding:40px 20px;text-align:center;
+  color:var(--text3);font-size:13px;
+}
+.empty::before{content:'—';display:block;font-size:28px;margin-bottom:8px;opacity:.3}
+
+/* ── DIVIDER ── */
+.mt{margin-top:16px}
+canvas{max-width:100%}
+
+/* ── SPARKLINE CONTAINER ── */
+.spark-wrap{position:relative;height:160px}
+.spark-wrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important}
+
+/* ── METRIC ROW on ISP page ── */
+.isp-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.isp-metric{
+  background:var(--s2);border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;
+}
+.isp-metric .num{font-size:28px;font-weight:700;font-family:var(--mono);line-height:1}
+.isp-metric .lbl{font-size:10px;color:var(--text3);margin-top:5px;letter-spacing:.8px;text-transform:uppercase}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">NW</div>
+    <span class="logo-text">NetWatch</span>
+    <span class="logo-host">{{ hostname }}</span>
+  </div>
+  <div class="header-right">
+    <span id="last-updated"></span>
+    <div id="status-badge" class="badge-ok">
+      <div class="dot"></div>
+      <span id="status-text">OK</span>
+    </div>
+  </div>
+</header>
+
+<nav>
+  <button class="active" onclick="showPage('overview')">Übersicht</button>
+  <button onclick="showPage('events')">Ereignisse</button>
+  <button onclick="showPage('latency')">Latenz</button>
+  <button onclick="showPage('speed')">Geschwindigkeit</button>
+  <button onclick="showPage('packetloss')">Paketverlust</button>
+  <button onclick="showPage('traceroutes')">Traceroutes</button>
+  <button onclick="showPage('iphistory')">IP-Historie</button>
+  <button onclick="showPage('isp')">ISP-Nachweise</button>
+  <button onclick="showPage('daily')">Tagesstatistik</button>
+</nav>
+
+<main>
+
+<!-- ══════════════ OVERVIEW ══════════════ -->
+<div id="page-overview" class="page active">
+  <div id="alert-banner" class="alert-banner">
+    <div class="pulse-ring"></div>
+    <span class="alert-text" id="alert-text">Aktiver Ausfall erkannt</span>
+  </div>
+
+  <div class="grid g4" style="margin-bottom:16px">
+
+    <!-- Availability ring card -->
+    <div class="card avail-card" style="padding:18px 20px">
+      <div class="ring-wrap">
+        <svg width="88" height="88" viewBox="0 0 88 88">
+          <circle cx="44" cy="44" r="36" fill="none" stroke="var(--s3)" stroke-width="6"/>
+          <circle id="ring-arc" cx="44" cy="44" r="36" fill="none"
+            stroke="var(--green)" stroke-width="6"
+            stroke-linecap="round"
+            stroke-dasharray="226.19"
+            stroke-dashoffset="0"
+            transform="rotate(-90 44 44)"
+            style="transition:stroke-dashoffset 1s ease,stroke .5s"/>
+        </svg>
+        <div class="ring-center">
+          <div class="ring-pct" id="ring-pct">–</div>
+          <div class="ring-label">30 Tage</div>
+        </div>
+      </div>
+      <div>
+        <div class="card-label">Verfügbarkeit</div>
+        <div class="big-num c-green" id="ov-avail" style="font-size:26px">–</div>
+        <div class="card-sub" id="ov-avail-sub">–</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Ausfälle gesamt</div>
+      <div class="big-num c-cyan" id="ov-outages">–</div>
+      <div class="card-sub" id="ov-outages-sub">–</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">ISP-Ausfälle</div>
+      <div class="big-num c-red" id="ov-isp">–</div>
+      <div class="card-sub">Aktueller Monat</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Öffentliche IP</div>
+      <div style="margin-top:6px">
+        <span class="ip-chip" id="ov-ip">–</span>
+      </div>
+      <div class="card-sub" id="ov-ip-sub">–</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Geschwindigkeit (aktuell)</div>
+      <div style="display:flex;gap:14px;align-items:baseline;margin-top:2px">
+        <div>
+          <div class="big-num c-cyan" id="ov-down" style="font-size:22px">–</div>
+          <div class="card-sub" style="margin-top:2px">↓ Down Mbit/s</div>
+        </div>
+        <div>
+          <div class="big-num c-cyan" id="ov-up" style="font-size:22px">–</div>
+          <div class="card-sub" style="margin-top:2px">↑ Up Mbit/s</div>
+        </div>
+      </div>
+      <div class="card-sub" id="ov-speed-time" style="margin-top:6px">–</div>
+    </div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <div class="card-label" style="margin-bottom:14px">Latenz – letzte 2 Stunden (Cloudflare)</div>
+      <div class="spark-wrap"><canvas id="chart-latency-overview"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-label" style="margin-bottom:14px">Letzte Ereignisse</div>
+      <div id="ov-events-table"><div class="empty">Keine Ereignisse</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ EVENTS ══════════════ -->
+<div id="page-events" class="page">
+  <div class="section-hd">
+    <h2>Ereignishistorie</h2>
+    <div class="row">
+      <select id="ev-type-filter" onchange="loadEvents()">
+        <option value="">Alle Typen</option>
+        <option value="ISP_FAILURE">ISP-Ausfall</option>
+        <option value="LOCAL_NETWORK_FAILURE">Lokal</option>
+        <option value="DNS_FAILURE">DNS</option>
+        <option value="PACKET_LOSS">Paketverlust</option>
+        <option value="LATENCY_DEGRADATION">Hohe Latenz</option>
+        <option value="ROUTING_FAILURE">Routing</option>
+      </select>
+    </div>
+  </div>
+  <div class="card"><div id="events-table"><div class="empty">Lade…</div></div></div>
+</div>
+
+<!-- ══════════════ LATENCY ══════════════ -->
+<div id="page-latency" class="page">
+  <div class="section-hd">
+    <h2>Latenz-Analyse</h2>
+    <div class="row">
+      <select id="lat-target" onchange="loadLatencyChart()">
+        <option value="Cloudflare DNS">Cloudflare (1.1.1.1)</option>
+        <option value="Google DNS">Google (8.8.8.8)</option>
+        <option value="Quad9 DNS">Quad9 (9.9.9.9)</option>
+      </select>
+      <select id="lat-hours" onchange="loadLatencyChart()">
+        <option value="2">2 Std.</option>
+        <option value="6">6 Std.</option>
+        <option value="24" selected>24 Std.</option>
+        <option value="48">48 Std.</option>
+        <option value="168">7 Tage</option>
+      </select>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="spark-wrap" style="height:220px"><canvas id="chart-latency"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="spark-wrap" style="height:140px"><canvas id="chart-jitter"></canvas></div>
+  </div>
+</div>
+
+<!-- ══════════════ SPEED ══════════════ -->
+<div id="page-speed" class="page">
+  <div class="section-hd">
+    <h2>Geschwindigkeit – Download / Upload</h2>
+    <div class="row">
+      <select id="speed-hours" onchange="loadSpeedChart()">
+        <option value="24">24 Std.</option>
+        <option value="48" selected>48 Std.</option>
+        <option value="168">7 Tage</option>
+        <option value="720">30 Tage</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="isp-metrics">
+    <div class="isp-metric">
+      <div class="num" style="color:var(--cyan)" id="speed-avg-down">–</div>
+      <div class="lbl">Ø Download Mbit/s</div>
+    </div>
+    <div class="isp-metric">
+      <div class="num" style="color:var(--cyan)" id="speed-avg-up">–</div>
+      <div class="lbl">Ø Upload Mbit/s</div>
+    </div>
+    <div class="isp-metric">
+      <div class="num" style="color:var(--red)" id="speed-min-down">–</div>
+      <div class="lbl">Min. Download Mbit/s</div>
+    </div>
+    <div class="isp-metric">
+      <div class="num" style="color:var(--green)" id="speed-max-down">–</div>
+      <div class="lbl">Max. Download Mbit/s</div>
+    </div>
+  </div>
+
+  <div id="fritz-proof-card" class="card" style="margin-bottom:16px;display:none">
+    <div class="card-label" style="margin-bottom:14px">FritzBox-Leitungsvergleich — Beweissicherung</div>
+    <div class="isp-metrics" style="margin-bottom:0">
+      <div class="isp-metric">
+        <div class="num" style="color:var(--green)" id="fritz-sync-down">–</div>
+        <div class="lbl">Leitung Sync ↓ Mbit/s</div>
+      </div>
+      <div class="isp-metric">
+        <div class="num" style="color:var(--green)" id="fritz-sync-up">–</div>
+        <div class="lbl">Leitung Sync ↑ Mbit/s</div>
+      </div>
+      <div class="isp-metric">
+        <div class="num" id="fritz-ratio">–</div>
+        <div class="lbl">Ø genutzte Leitung</div>
+      </div>
+      <div class="isp-metric">
+        <div class="num" style="color:var(--cyan);font-size:18px" id="fritz-link">–</div>
+        <div class="lbl">Leitungsstatus</div>
+      </div>
+    </div>
+    <div id="fritz-verdict" style="margin-top:14px;padding:12px 14px;border-radius:8px;font-size:13px;line-height:1.5"></div>
+  </div>
+
+  <div id="dsl-card" class="card" style="margin-bottom:16px;display:none">
+    <div class="card-label" style="margin-bottom:14px">DSL-Leitungsdiagnose — physikalische Leitungsgrenze</div>
+    <div class="isp-metrics" style="margin-bottom:0">
+      <div class="isp-metric">
+        <div class="num" id="dsl-contract" style="color:var(--cyan)">–</div>
+        <div class="lbl">Vertrag ↓ Mbit/s</div>
+      </div>
+      <div class="isp-metric">
+        <div class="num" id="dsl-max" style="color:var(--orange)">–</div>
+        <div class="lbl">Phys. Maximum ↓ Mbit/s</div>
+      </div>
+      <div class="isp-metric">
+        <div class="num" id="dsl-snr" style="color:var(--text)">–</div>
+        <div class="lbl">SNR-Marge ↓ dB</div>
+      </div>
+      <div class="isp-metric">
+        <div class="num" id="dsl-att" style="color:var(--text)">–</div>
+        <div class="lbl">Dämpfung ↓ dB</div>
+      </div>
+    </div>
+    <div id="dsl-verdict" style="margin-top:14px;padding:12px 14px;border-radius:8px;font-size:13px;line-height:1.5"></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-label" style="margin-bottom:14px">Download- / Upload-Verlauf (mit Leitungs-Sync)</div>
+    <div class="spark-wrap" style="height:240px"><canvas id="chart-speed"></canvas></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-label" style="margin-bottom:14px">Geschwindigkeit nach Tageszeit (Ø, alle Tage)</div>
+    <div class="spark-wrap" style="height:200px"><canvas id="chart-speed-hourly"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div class="card-label" style="margin-bottom:14px">Letzte Messungen</div>
+    <div id="speed-table"><div class="empty">Lade…</div></div>
+  </div>
+</div>
+
+<!-- ══════════════ PACKET LOSS ══════════════ -->
+<div id="page-packetloss" class="page">
+  <div class="section-hd"><h2>Paketverlust-Analyse</h2></div>
+  <div class="card">
+    <div class="spark-wrap" style="height:220px"><canvas id="chart-packetloss"></canvas></div>
+  </div>
+</div>
+
+<!-- ══════════════ TRACEROUTES ══════════════ -->
+<div id="page-traceroutes" class="page">
+  <div class="section-hd"><h2>Traceroute-Auswertungen</h2></div>
+  <div id="traceroutes-list"></div>
+</div>
+
+<!-- ══════════════ IP HISTORY ══════════════ -->
+<div id="page-iphistory" class="page">
+  <div class="section-hd"><h2>Öffentliche IP – Historie</h2></div>
+  <div class="card"><div id="ip-table"><div class="empty">Lade…</div></div></div>
+</div>
+
+<!-- ══════════════ ISP ══════════════ -->
+<div id="page-isp" class="page">
+  <div class="section-hd"><h2>ISP-Nachweise</h2></div>
+  <div class="isp-metrics">
+    <div class="isp-metric">
+      <div class="num" style="color:var(--red)" id="isp-count">–</div>
+      <div class="lbl">ISP-Ausfälle</div>
+    </div>
+    <div class="isp-metric">
+      <div class="num" style="color:var(--orange)" id="isp-downtime">–</div>
+      <div class="lbl">Ausfallzeit</div>
+    </div>
+    <div class="isp-metric">
+      <div class="num" style="color:var(--cyan)" id="local-count">–</div>
+      <div class="lbl">Lokale Ausfälle</div>
+    </div>
+    <div class="isp-metric">
+      <div class="num" style="color:var(--yellow)" id="dns-count">–</div>
+      <div class="lbl">DNS-Ausfälle</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-label" style="margin-bottom:14px">ISP-Ereignisse mit Beweisdaten</div>
+    <div id="isp-events-table"><div class="empty">Lade…</div></div>
+  </div>
+</div>
+
+<!-- ══════════════ DAILY ══════════════ -->
+<div id="page-daily" class="page">
+  <div class="section-hd"><h2>Tagesstatistik</h2></div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="spark-wrap" style="height:180px"><canvas id="chart-daily-avail"></canvas></div>
+  </div>
+  <div class="card"><div id="daily-table"><div class="empty">Lade…</div></div></div>
+</div>
+
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+// ── Global defaults for Chart.js ──
+Chart.defaults.color = '#6B7E95';
+Chart.defaults.borderColor = '#1E2D40';
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+
+const GRID = '#1A2232';
+const charts = {};
+let currentPage = 'overview';
+
+// ── Nav ──
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('nav button').forEach(b => {
+    if (b.getAttribute('onclick')?.includes("'" + name + "'")) b.classList.add('active');
+  });
+  currentPage = name;
+  loadPageData(name);
+}
+function loadPageData(n) {
+  const map = { overview: loadOverview, events: loadEvents, latency: loadLatencyChart,
+    speed: loadSpeedChart,
+    packetloss: loadPacketLossChart, traceroutes: loadTraceroutes,
+    iphistory: loadIpHistory, isp: loadIsp, daily: loadDailyStats };
+  map[n]?.();
+}
+
+// ── Helpers ──
+function fmtTs(ts) {
+  if (!ts) return '–';
+  return ts.substring(0,16).replace('T', ' ');
+}
+function fmtAvail(pct) {
+  if (pct === null || pct === undefined) return '–';
+  if (pct >= 100) return '100%';
+  if (pct >= 99.99) return '99.99%';
+  return pct.toFixed(2) + '%';
+}
+function availColor(pct) {
+  if (pct >= 99.9) return '#00FF88';
+  if (pct >= 99.0) return '#FF9F43';
+  return '#FF4560';
+}
+function escHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function typeBadge(t) {
+  const map = {
+    ISP_FAILURE:          ['b-isp',     'ISP-Ausfall'],
+    LOCAL_NETWORK_FAILURE:['b-local',   'Lokal'],
+    DNS_FAILURE:          ['b-dns',     'DNS'],
+    LATENCY_DEGRADATION:  ['b-latency', 'Latenz'],
+    PACKET_LOSS:          ['b-packet',  'Paketverlust'],
+    ROUTING_FAILURE:      ['b-routing', 'Routing'],
+    RECOVERED:            ['b-ok',      'Behoben'],
+  };
+  const [cls, label] = map[t] || ['b-ok', t];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// Flags events where the measurement cycle ran long or the Pi was under
+// heavy load at the moment the event fired — a strong hint the event may
+// be a false positive caused by the host itself, not the network.
+function resourceFlag(ev) {
+  const cycleLong = ev.measurement_cycle_seconds && ev.measurement_cycle_seconds > 8;
+  const cpuHigh = ev.cpu_percent && ev.cpu_percent > 85;
+  const loadHigh = ev.load_avg_1m && ev.load_avg_1m > 4;
+  if (cycleLong || cpuHigh || loadHigh) {
+    const parts = [];
+    if (cycleLong) parts.push(`Zyklus ${ev.measurement_cycle_seconds.toFixed(1)}s`);
+    if (cpuHigh) parts.push(`CPU ${ev.cpu_percent.toFixed(0)}%`);
+    if (loadHigh) parts.push(`Load ${ev.load_avg_1m.toFixed(1)}`);
+    return `<span class="badge" style="background:rgba(255,217,61,.15);color:var(--yellow);border:1px solid rgba(255,217,61,.25)" title="Pi war zu diesem Zeitpunkt evtl. überlastet — Ergebnis ggf. falsch-positiv">⚠ ${parts.join(' · ')}</span>`;
+  }
+  return '';
+}
+function makeChart(id, type, labels, datasets, opts={}) {
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(canvas, {
+    type, data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: { legend: { labels: { color: '#6B7E95', boxWidth: 10, font:{size:11} } } },
+      scales: {
+        x: { ticks:{ color:'#3D5166', maxTicksLimit:8, font:{size:10} }, grid:{ color:GRID } },
+        y: { ticks:{ color:'#3D5166', font:{size:10} }, grid:{ color:GRID } }
+      },
+      ...opts
+    }
+  });
+}
+
+// ── Ring arc update ──
+function setRing(pct) {
+  const circ = 226.19;
+  const offset = circ * (1 - pct / 100);
+  const arc = document.getElementById('ring-arc');
+  if (!arc) return;
+  arc.style.strokeDashoffset = offset;
+  arc.style.stroke = availColor(pct);
+}
+
+// ── Overview ──
+async function loadOverview() {
+  const [status, monthly, events, latestSpeed] = await Promise.all([
+    fetch('/api/status').then(r=>r.json()).catch(()=>({})),
+    fetch('/api/monthly_stats').then(r=>r.json()).catch(()=>({})),
+    fetch('/api/events?limit=10').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/speedtests/latest').then(r=>r.json()).catch(()=>({})),
+  ]);
+
+  // Status badge
+  const badge = document.getElementById('status-badge');
+  const stext = document.getElementById('status-text');
+  const banner = document.getElementById('alert-banner');
+  if (status.open_events > 0) {
+    badge.className = 'badge-problem';
+    stext.textContent = 'PROBLEM';
+    banner.style.display = 'flex';
+    document.getElementById('alert-text').textContent =
+      `${status.open_events} aktives Ereignis erkannt`;
+  } else {
+    badge.className = 'badge-ok';
+    stext.textContent = 'OK';
+    banner.style.display = 'none';
+  }
+
+  // Metrics
+  const avail = monthly.availability_percent ?? 100;
+  document.getElementById('ov-avail').textContent = fmtAvail(avail);
+  document.getElementById('ov-avail').style.color = availColor(avail);
+  document.getElementById('ring-pct').textContent = fmtAvail(avail);
+  document.getElementById('ring-pct').style.color = availColor(avail);
+  document.getElementById('ov-avail-sub').textContent = `Ausfall: ${monthly.total_downtime_human || '0s'}`;
+  document.getElementById('ov-outages').textContent = monthly.outage_count ?? 0;
+  document.getElementById('ov-outages-sub').textContent =
+    `ISP: ${monthly.isp_failure_count ?? 0} · Lokal: ${monthly.local_failure_count ?? 0}`;
+  document.getElementById('ov-isp').textContent = monthly.isp_failure_count ?? 0;
+  document.getElementById('ov-ip').textContent = status.latest_ipv4 || '–';
+  document.getElementById('ov-ip-sub').textContent =
+    status.latest_ipv6 ? `IPv6 aktiv` : 'Kein IPv6';
+  setRing(avail);
+
+  // Latest speedtest
+  if (latestSpeed && latestSpeed.download_mbps != null) {
+    document.getElementById('ov-down').textContent = latestSpeed.download_mbps.toFixed(1);
+    document.getElementById('ov-up').textContent = (latestSpeed.upload_mbps ?? 0).toFixed(1);
+    document.getElementById('ov-speed-time').textContent = 'Gemessen ' + fmtTs(latestSpeed.timestamp);
+  } else {
+    document.getElementById('ov-down').textContent = '–';
+    document.getElementById('ov-up').textContent = '–';
+    document.getElementById('ov-speed-time').textContent = 'Noch keine Messung';
+  }
+
+  // Events table
+  const rows = events.slice(0, 8).map(ev => `
+    <tr>
+      <td class="mono">${fmtTs(ev.started_at)}</td>
+      <td>${typeBadge(ev.event_type)}</td>
+      <td class="mono" style="color:var(--text2)">${ev.duration_human || '–'}</td>
+      <td style="color:var(--text2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        ${escHtml((ev.description||'').substring(0,60))}
+      </td>
+    </tr>`).join('');
+  document.getElementById('ov-events-table').innerHTML = rows
+    ? `<table><thead><tr><th>Zeit</th><th>Typ</th><th>Dauer</th><th>Beschreibung</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<div class="empty">Keine Ereignisse aufgezeichnet</div>';
+
+  // Mini latency chart
+  await buildLatencyMini('chart-latency-overview', 'Cloudflare DNS', 2);
+  document.getElementById('last-updated').textContent =
+    'Aktualisiert ' + new Date().toLocaleTimeString('de-CH');
+}
+
+async function buildLatencyMini(id, target, hours) {
+  const data = await fetch(`/api/latency_chart?target=${encodeURIComponent(target)}&hours=${hours}`)
+    .then(r=>r.json()).catch(()=>({labels:[],latency_ms:[]}));
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  if (charts[id]) charts[id].destroy();
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height || 160);
+  grad.addColorStop(0, 'rgba(0,212,255,.18)');
+  grad.addColorStop(1, 'rgba(0,212,255,0)');
+  charts[id] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: data.labels,
+      datasets: [{
+        label: 'Latenz ms',
+        data: data.latency_ms,
+        borderColor: '#00D4FF',
+        backgroundColor: grad,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.4,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 600 },
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks:{ color:'#3D5166', maxTicksLimit:6, font:{size:10} }, grid:{ color:GRID } },
+        y: { ticks:{ color:'#3D5166', font:{size:10} }, grid:{ color:GRID },
+             title:{ display:true, text:'ms', color:'#3D5166', font:{size:10} } }
+      }
+    }
+  });
+}
+
+// ── Latency page ──
+async function loadLatencyChart() {
+  const target = document.getElementById('lat-target')?.value || 'Cloudflare DNS';
+  const hours  = document.getElementById('lat-hours')?.value || 24;
+  const data = await fetch(`/api/latency_chart?target=${encodeURIComponent(target)}&hours=${hours}`)
+    .then(r=>r.json()).catch(()=>({labels:[],latency_ms:[],packet_loss_percent:[]}));
+
+  const makeCtxGrad = (id, r, g, b) => {
+    const c = document.getElementById(id);
+    if (!c) return 'transparent';
+    const ctx = c.getContext('2d');
+    const grad = ctx.createLinearGradient(0,0,0,c.clientHeight||200);
+    grad.addColorStop(0, `rgba(${r},${g},${b},.2)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    return grad;
+  };
+
+  const latOpts = { responsive:true, maintainAspectRatio:false, animation:{duration:400},
+    plugins:{ legend:{ labels:{color:'#6B7E95',boxWidth:10,font:{size:11}} } },
+    scales:{
+      x:{ ticks:{color:'#3D5166',maxTicksLimit:10,font:{size:10}}, grid:{color:GRID} },
+      y:{ ticks:{color:'#3D5166',font:{size:10}}, grid:{color:GRID},
+          title:{display:true,text:'ms',color:'#3D5166'} }
+    }
+  };
+
+  const canvas1 = document.getElementById('chart-latency');
+  if (canvas1) {
+    if (charts['chart-latency']) charts['chart-latency'].destroy();
+    charts['chart-latency'] = new Chart(canvas1, {
+      type:'line', data:{
+        labels: data.labels,
+        datasets:[{ label:`Latenz · ${target}`, data:data.latency_ms,
+          borderColor:'#00D4FF', backgroundColor:makeCtxGrad('chart-latency',0,212,255),
+          borderWidth:1.5, pointRadius:0, tension:0.3, fill:true }]
+      }, options: latOpts
+    });
+  }
+
+  const canvas2 = document.getElementById('chart-jitter');
+  if (canvas2) {
+    if (charts['chart-jitter']) charts['chart-jitter'].destroy();
+    charts['chart-jitter'] = new Chart(canvas2, {
+      type:'line', data:{
+        labels: data.labels,
+        datasets:[{ label:'Paketverlust %', data:data.packet_loss_percent,
+          borderColor:'#FF9F43', backgroundColor:makeCtxGrad('chart-jitter',255,159,67),
+          borderWidth:1.5, pointRadius:0, tension:0.3, fill:true }]
+      }, options:{ ...latOpts,
+        scales:{ ...latOpts.scales,
+          y:{ ...latOpts.scales.y, title:{display:true,text:'%',color:'#3D5166'}, max:100 } }
+      }
+    });
+  }
+}
+
+// ── Packet loss page ──
+// ── Speed page ──
+async function loadSpeedChart() {
+  const hours = document.getElementById('speed-hours')?.value || 48;
+  const [rows, fritzLatest] = await Promise.all([
+    fetch(`/api/speedtests?hours=${hours}&limit=1000`).then(r=>r.json()).catch(()=>[]),
+    fetch('/api/fritzbox/latest').then(r=>r.json()).catch(()=>({})),
+  ]);
+
+  if (!rows.length) {
+    document.getElementById('speed-table').innerHTML =
+      '<div class="empty">Noch keine Geschwindigkeitsmessungen — der erste Test läuft kurz nach dem Start, danach alle 15 Minuten</div>';
+    ['speed-avg-down','speed-avg-up','speed-min-down','speed-max-down'].forEach(id=>{
+      const el = document.getElementById(id); if (el) el.textContent = '–';
+    });
+    return;
+  }
+
+  const sorted = [...rows].filter(r=>r.success).sort((a,b)=>a.timestamp.localeCompare(b.timestamp));
+  const downs = sorted.map(r=>r.download_mbps).filter(v=>v!=null);
+  const ups   = sorted.map(r=>r.upload_mbps).filter(v=>v!=null);
+
+  const avg = arr => arr.length ? (arr.reduce((a,b)=>a+b,0)/arr.length) : null;
+  const avgDown = avg(downs);
+  document.getElementById('speed-avg-down').textContent = avgDown?.toFixed(1) ?? '–';
+  document.getElementById('speed-avg-up').textContent = avg(ups)?.toFixed(1) ?? '–';
+  document.getElementById('speed-min-down').textContent = downs.length ? Math.min(...downs).toFixed(1) : '–';
+  document.getElementById('speed-max-down').textContent = downs.length ? Math.max(...downs).toFixed(1) : '–';
+
+  // ── FritzBox line comparison (the evidence) ──
+  // Use the sync rate carried alongside each speedtest where available,
+  // falling back to the latest standalone FritzBox reading.
+  const syncDownSamples = sorted.map(r=>r.fritz_down_sync_mbps).filter(v=>v!=null);
+  const syncDown = syncDownSamples.length
+    ? syncDownSamples[syncDownSamples.length-1]
+    : (fritzLatest?.downstream_sync_mbps ?? null);
+  const syncUp = fritzLatest?.upstream_sync_mbps
+    ?? (sorted.map(r=>r.fritz_up_sync_mbps).filter(v=>v!=null).slice(-1)[0] ?? null);
+
+  const proofCard = document.getElementById('fritz-proof-card');
+  if (syncDown && avgDown != null) {
+    proofCard.style.display = 'block';
+    document.getElementById('fritz-sync-down').textContent = syncDown.toFixed(1);
+    document.getElementById('fritz-sync-up').textContent = syncUp?.toFixed(1) ?? '–';
+
+    const ratio = avgDown / syncDown;
+    const pct = ratio * 100;
+    const ratioEl = document.getElementById('fritz-ratio');
+    ratioEl.textContent = pct.toFixed(0) + '%';
+    ratioEl.style.color = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--orange)' : 'var(--red)';
+
+    const link = fritzLatest?.physical_link_status || sorted.slice(-1)[0]?.fritz_physical_link_status || '–';
+    const conn = fritzLatest?.connection_status || sorted.slice(-1)[0]?.fritz_connection_status || '–';
+    document.getElementById('fritz-link').textContent = `${link} / ${conn}`;
+
+    // Verdict box: states what the data implies about cause
+    const verdict = document.getElementById('fritz-verdict');
+    const lineHealthy = (link === 'Up') && (conn === 'Connected' || conn === '–');
+    if (pct < 50 && lineHealthy) {
+      verdict.style.background = 'rgba(255,69,96,.1)';
+      verdict.style.border = '1px solid rgba(255,69,96,.3)';
+      verdict.style.color = 'var(--red)';
+      verdict.innerHTML = `<strong>⚠ Drosselung wahrscheinlich im Providernetz.</strong> ` +
+        `Die FritzBox-Leitung synct mit ${syncDown.toFixed(1)} Mbit/s und ist physisch verbunden (${link}/${conn}), ` +
+        `aber es kommen im Schnitt nur ${avgDown.toFixed(1)} Mbit/s an (${pct.toFixed(0)}% der Leitung). ` +
+        `Da die Leitung selbst gesund ist, liegt der Engpass zwischen FritzBox und Provider — nicht am Pi oder im Heimnetz.`;
+    } else if (pct >= 80) {
+      verdict.style.background = 'rgba(0,255,136,.08)';
+      verdict.style.border = '1px solid rgba(0,255,136,.25)';
+      verdict.style.color = 'var(--green)';
+      verdict.innerHTML = `<strong>✓ Leitung wird gut ausgenutzt.</strong> ` +
+        `Durchschnittlich ${avgDown.toFixed(1)} von ${syncDown.toFixed(1)} Mbit/s (${pct.toFixed(0)}%). Keine Drosselung erkennbar.`;
+    } else {
+      verdict.style.background = 'rgba(255,159,67,.08)';
+      verdict.style.border = '1px solid rgba(255,159,67,.25)';
+      verdict.style.color = 'var(--orange)';
+      verdict.innerHTML = `<strong>Teilauslastung.</strong> ` +
+        `Durchschnittlich ${avgDown.toFixed(1)} von ${syncDown.toFixed(1)} Mbit/s (${pct.toFixed(0)}%). ` +
+        `Beobachten — bei dauerhaft niedrigen Werten und gesunder Leitung deutet das auf Providerseitige Begrenzung hin.`;
+    }
+  } else {
+    proofCard.style.display = 'none';
+  }
+
+  // ── DSL diagnostics + contract comparison (the hard technical evidence) ──
+  const dslCard = document.getElementById('dsl-card');
+  const dslMax = fritzLatest?.dsl_down_max_mbps ?? null;
+  const contract = fritzLatest?.contract_download_mbps ?? 0;
+  if (dslMax || (contract > 0 && syncDown)) {
+    dslCard.style.display = 'block';
+    document.getElementById('dsl-contract').textContent = contract > 0 ? contract.toFixed(0) : '–';
+    document.getElementById('dsl-max').textContent = dslMax?.toFixed(1) ?? '–';
+    document.getElementById('dsl-snr').textContent = fritzLatest?.dsl_down_snr_db?.toFixed(1) ?? '–';
+    document.getElementById('dsl-att').textContent = fritzLatest?.dsl_down_attenuation_db?.toFixed(1) ?? '–';
+
+    const dslVerdict = document.getElementById('dsl-verdict');
+    const parts = [];
+    let severity = 'ok';
+
+    // Contract vs physical max: can the line even deliver the contract?
+    if (contract > 0 && dslMax) {
+      const maxPct = (dslMax / contract) * 100;
+      if (dslMax < contract * 0.95) {
+        severity = 'bad';
+        parts.push(
+          `Die Leitung schafft physikalisch maximal <strong>${dslMax.toFixed(1)} Mbit/s</strong>, ` +
+          `der Vertrag sieht aber <strong>${contract.toFixed(0)} Mbit/s</strong> vor — ` +
+          `das sind nur ${maxPct.toFixed(0)}% der vereinbarten Geschwindigkeit. ` +
+          `Die Leitung kann den Vertrag physikalisch nicht erfüllen.`
+        );
+      } else {
+        parts.push(`Physikalisches Maximum (${dslMax.toFixed(1)} Mbit/s) deckt den Vertrag (${contract.toFixed(0)} Mbit/s).`);
+      }
+    }
+
+    // Contract vs current sync
+    if (contract > 0 && syncDown) {
+      const syncPct = (syncDown / contract) * 100;
+      if (syncDown < contract * 0.9) {
+        if (severity !== 'bad') severity = 'warn';
+        parts.push(
+          `Aktueller Sync <strong>${syncDown.toFixed(1)} Mbit/s</strong> = ${syncPct.toFixed(0)}% des Vertrags.`
+        );
+      }
+    }
+
+    // SNR margin interpretation
+    const snr = fritzLatest?.dsl_down_snr_db;
+    if (snr != null && snr > 12) {
+      parts.push(
+        `Auffällig hohe SNR-Marge von ${snr.toFixed(1)} dB (üblich ~6 dB) — ` +
+        `die Leitung ist providerseitig konservativ konfiguriert und könnte vermutlich höher syncen. ` +
+        `Lohnender Punkt zur Nachfrage beim Provider.`
+      );
+    }
+
+    const colorMap = {
+      bad:  ['rgba(255,69,96,.1)',  'rgba(255,69,96,.3)',  'var(--red)'],
+      warn: ['rgba(255,159,67,.08)','rgba(255,159,67,.25)','var(--orange)'],
+      ok:   ['rgba(0,255,136,.08)', 'rgba(0,255,136,.25)', 'var(--green)'],
+    };
+    const [bg, border, col] = colorMap[severity];
+    dslVerdict.style.background = bg;
+    dslVerdict.style.border = `1px solid ${border}`;
+    dslVerdict.style.color = col;
+    const prefix = severity === 'bad'
+      ? '<strong>⚠ Leitung erfüllt den Vertrag nicht.</strong> '
+      : severity === 'warn' ? '<strong>Leitung unter Vertragswert.</strong> ' : '<strong>✓ Leitung im Rahmen.</strong> ';
+    dslVerdict.innerHTML = prefix + parts.join(' ');
+
+    // Color the max value vs contract
+    const dslMaxEl = document.getElementById('dsl-max');
+    if (contract > 0 && dslMax) {
+      dslMaxEl.style.color = dslMax < contract * 0.95 ? 'var(--red)' : 'var(--green)';
+    }
+  } else {
+    dslCard.style.display = 'none';
+  }
+  const canvas = document.getElementById('chart-speed');
+  if (canvas) {
+    if (charts['chart-speed']) charts['chart-speed'].destroy();
+    const ctx = canvas.getContext('2d');
+    const gradDown = ctx.createLinearGradient(0,0,0,canvas.clientHeight||240);
+    gradDown.addColorStop(0, 'rgba(0,212,255,.2)');
+    gradDown.addColorStop(1, 'rgba(0,212,255,0)');
+
+    const datasets = [
+      { label: 'Download Mbit/s', data: sorted.map(r=>r.download_mbps),
+        borderColor:'#00D4FF', backgroundColor:gradDown, borderWidth:1.5,
+        pointRadius:0, tension:0.3, fill:true },
+      { label: 'Upload Mbit/s', data: sorted.map(r=>r.upload_mbps),
+        borderColor:'#A855F7', backgroundColor:'transparent', borderWidth:1.5,
+        pointRadius:0, tension:0.3, fill:false },
+    ];
+    // Sync rate as a dashed reference line — the line capacity ceiling
+    if (syncDown) {
+      datasets.push({
+        label: `Leitung Sync ↓ (${syncDown.toFixed(0)} Mbit/s)`,
+        data: sorted.map(()=>syncDown),
+        borderColor:'#00FF88', borderWidth:1.5, borderDash:[6,4],
+        pointRadius:0, fill:false,
+      });
+    }
+
+    charts['chart-speed'] = new Chart(canvas, {
+      type: 'line',
+      data: { labels: sorted.map(r => r.timestamp.substring(0,16).replace('T',' ')), datasets },
+      options: {
+        responsive:true, maintainAspectRatio:false, animation:{duration:400},
+        plugins:{ legend:{ labels:{color:'#6B7E95',boxWidth:10,font:{size:11}} } },
+        scales:{
+          x:{ ticks:{color:'#3D5166',maxTicksLimit:10,font:{size:10}}, grid:{color:GRID} },
+          y:{ ticks:{color:'#3D5166',font:{size:10}}, grid:{color:GRID},
+              title:{display:true,text:'Mbit/s',color:'#3D5166'}, beginAtZero:true }
+        }
+      }
+    });
+  }
+
+  // Hourly-of-day aggregation — reveals whether speed dips at specific
+  // times (e.g. evening prime-time throttling) by averaging every
+  // measurement across all collected days into its hour-of-day bucket.
+  const hourBuckets = Array.from({length:24}, () => ({down:[], up:[]}));
+  sorted.forEach(r => {
+    const hour = new Date(r.timestamp).getHours();
+    if (r.download_mbps != null) hourBuckets[hour].down.push(r.download_mbps);
+    if (r.upload_mbps != null) hourBuckets[hour].up.push(r.upload_mbps);
+  });
+  const hourlyDown = hourBuckets.map(b => b.down.length ? avg(b.down) : null);
+  const hourlyUp   = hourBuckets.map(b => b.up.length ? avg(b.up) : null);
+
+  const canvas2 = document.getElementById('chart-speed-hourly');
+  if (canvas2) {
+    if (charts['chart-speed-hourly']) charts['chart-speed-hourly'].destroy();
+    charts['chart-speed-hourly'] = new Chart(canvas2, {
+      type: 'bar',
+      data: {
+        labels: Array.from({length:24}, (_,h) => `${h}:00`),
+        datasets: [
+          { label: 'Ø Download', data: hourlyDown,
+            backgroundColor: 'rgba(0,212,255,.55)', borderWidth:0, borderRadius:3 },
+          { label: 'Ø Upload', data: hourlyUp,
+            backgroundColor: 'rgba(168,85,247,.55)', borderWidth:0, borderRadius:3 },
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ labels:{color:'#6B7E95'} } },
+        scales:{
+          x:{ ticks:{color:'#3D5166',font:{size:9}}, grid:{color:GRID} },
+          y:{ ticks:{color:'#3D5166',font:{size:10}}, grid:{color:GRID},
+              title:{display:true,text:'Mbit/s',color:'#3D5166'}, beginAtZero:true }
+        }
+      }
+    });
+  }
+
+  // Table — most recent first, with % of line
+  const trs = [...rows].slice(0,50).map(r => {
+    let linePct = '–';
+    if (r.success && r.download_mbps != null && r.fritz_down_sync_mbps) {
+      const p = (r.download_mbps / r.fritz_down_sync_mbps) * 100;
+      const col = p >= 80 ? 'var(--green)' : p >= 50 ? 'var(--orange)' : 'var(--red)';
+      linePct = `<span style="color:${col}">${p.toFixed(0)}%</span>`;
+    }
+    return `
+    <tr>
+      <td class="mono">${fmtTs(r.timestamp)}</td>
+      <td class="mono" style="color:var(--cyan)">${r.success ? (r.download_mbps?.toFixed(1) ?? '–') : '–'}</td>
+      <td class="mono" style="color:var(--purple)">${r.success ? (r.upload_mbps?.toFixed(1) ?? '–') : '–'}</td>
+      <td class="mono" style="color:var(--green)">${r.fritz_down_sync_mbps?.toFixed(1) ?? '–'}</td>
+      <td class="mono">${linePct}</td>
+      <td class="mono" style="color:var(--text2)">${r.latency_ms?.toFixed(0) ?? '–'}</td>
+      <td>${r.success ? '<span class="badge b-ok">OK</span>' : `<span class="badge b-isp">Fehler</span>`}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('speed-table').innerHTML =
+    `<table><thead><tr><th>Zeit</th><th>Down Mbit/s</th><th>Up Mbit/s</th><th>Leitung Sync ↓</th><th>% Leitung</th><th>Latenz ms</th><th>Status</th></tr></thead><tbody>${trs}</tbody></table>`;
+}
+
+async function loadPacketLossChart() {
+  const data = await fetch('/api/latency_chart?target=Cloudflare DNS&hours=24')
+    .then(r=>r.json()).catch(()=>({labels:[],packet_loss_percent:[]}));
+  const canvas = document.getElementById('chart-packetloss');
+  if (!canvas) return;
+  if (charts['chart-packetloss']) charts['chart-packetloss'].destroy();
+  charts['chart-packetloss'] = new Chart(canvas, {
+    type:'bar',
+    data:{ labels:data.labels, datasets:[{
+      label:'Paketverlust %',
+      data:data.packet_loss_percent,
+      backgroundColor: data.packet_loss_percent.map(v =>
+        v > 20 ? 'rgba(255,69,96,.7)' : v > 5 ? 'rgba(255,159,67,.7)' : 'rgba(0,212,255,.4)'),
+      borderWidth:0, borderRadius:2,
+    }]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ labels:{color:'#6B7E95'} } },
+      scales:{
+        x:{ ticks:{color:'#3D5166',maxTicksLimit:12,font:{size:10}}, grid:{color:GRID} },
+        y:{ ticks:{color:'#3D5166',font:{size:10}}, grid:{color:GRID},
+            title:{display:true,text:'%',color:'#3D5166'}, max:100 }
+      }
+    }
+  });
+}
+
+// ── Events page ──
+async function loadEvents() {
+  const type = document.getElementById('ev-type-filter')?.value || '';
+  const url  = type ? `/api/events?type=${type}&limit=200` : '/api/events?limit=200';
+  const events = await fetch(url).then(r=>r.json()).catch(()=>[]);
+  const rows = events.map(ev => `
+    <tr>
+      <td class="mono">${fmtTs(ev.started_at)}</td>
+      <td class="mono">${fmtTs(ev.ended_at)}</td>
+      <td>${typeBadge(ev.event_type)}</td>
+      <td class="mono" style="color:var(--text2)">${ev.duration_human || '–'}</td>
+      <td class="mono" style="color:var(--text2)">${(ev.confidence_score*100).toFixed(0)}%</td>
+      <td class="mono" style="color:var(--cyan)">${ev.public_ipv4_before || '–'}</td>
+      <td>${resourceFlag(ev)}</td>
+      <td style="color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        ${escHtml((ev.description||'').substring(0,70))}</td>
+    </tr>`).join('');
+  document.getElementById('events-table').innerHTML = rows
+    ? `<table><thead><tr><th>Beginn</th><th>Ende</th><th>Typ</th><th>Dauer</th><th>Conf.</th><th>IPv4 vorher</th><th>Pi-Last</th><th>Beschreibung</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<div class="empty">Keine Ereignisse</div>';
+}
+
+// ── Traceroutes ──
+async function loadTraceroutes() {
+  const rows = await fetch('/api/traceroutes?limit=30').then(r=>r.json()).catch(()=>[]);
+  if (!rows.length) {
+    document.getElementById('traceroutes-list').innerHTML =
+      '<div class="card"><div class="empty">Keine Traceroutes gespeichert</div></div>';
+    return;
+  }
+  document.getElementById('traceroutes-list').innerHTML = rows.map(r => `
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <span class="badge b-routing">${r.tool}</span>
+        <span class="mono" style="color:var(--cyan)">${r.target_host}</span>
+        <span class="mono" style="color:var(--text3)">${fmtTs(r.timestamp)}</span>
+        <span class="mono" style="color:var(--text3)">${r.duration_seconds?.toFixed(1)}s</span>
+      </div>
+      <pre>${escHtml(r.output || '(leer)')}</pre>
+    </div>`).join('');
+}
+
+// ── IP History ──
+async function loadIpHistory() {
+  const rows = await fetch('/api/public_ip?limit=100').then(r=>r.json()).catch(()=>[]);
+  const trs = rows.map(r => `
+    <tr>
+      <td class="mono">${fmtTs(r.timestamp)}</td>
+      <td><span class="ip-chip">${r.ipv4 || '–'}</span></td>
+      <td class="mono" style="color:var(--text2)">${r.ipv6 || '–'}</td>
+      <td>${r.changed ? '<span class="badge b-isp">Geändert</span>' : '<span style="color:var(--text3)">–</span>'}</td>
+    </tr>`).join('');
+  document.getElementById('ip-table').innerHTML = trs
+    ? `<table><thead><tr><th>Zeitpunkt</th><th>IPv4</th><th>IPv6</th><th>Änderung</th></tr></thead><tbody>${trs}</tbody></table>`
+    : '<div class="empty">Keine Daten</div>';
+}
+
+// ── ISP ──
+async function loadIsp() {
+  const [monthly, events] = await Promise.all([
+    fetch('/api/monthly_stats').then(r=>r.json()).catch(()=>({})),
+    fetch('/api/events?type=ISP_FAILURE&limit=100').then(r=>r.json()).catch(()=>[]),
+  ]);
+  document.getElementById('isp-count').textContent    = monthly.isp_failure_count ?? 0;
+  document.getElementById('isp-downtime').textContent = monthly.total_downtime_human || '0s';
+  document.getElementById('local-count').textContent  = monthly.local_failure_count ?? 0;
+  document.getElementById('dns-count').textContent    = monthly.dns_failure_count ?? 0;
+
+  const rows = events.map(ev => `
+    <tr>
+      <td class="mono">${fmtTs(ev.started_at)}</td>
+      <td class="mono">${fmtTs(ev.ended_at)}</td>
+      <td class="mono" style="color:var(--text2)">${ev.duration_human || 'offen'}</td>
+      <td class="mono" style="color:var(--text2)">${(ev.confidence_score*100).toFixed(0)}%</td>
+      <td><span class="ip-chip">${ev.public_ipv4_before || '–'}</span></td>
+      <td><span class="ip-chip">${ev.public_ipv4_during || '–'}</span></td>
+      <td><span class="ip-chip">${ev.public_ipv4_after || '–'}</span></td>
+    </tr>`).join('');
+  document.getElementById('isp-events-table').innerHTML = rows
+    ? `<table><thead><tr><th>Beginn</th><th>Ende</th><th>Dauer</th><th>Conf.</th><th>IP vorher</th><th>IP während</th><th>IP danach</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<div class="empty">Keine ISP-Ausfälle aufgezeichnet</div>';
+}
+
+// ── Daily Stats ──
+async function loadDailyStats() {
+  const rows = await fetch('/api/daily_stats').then(r=>r.json()).catch(()=>[]);
+  if (!rows.length) {
+    document.getElementById('daily-table').innerHTML = '<div class="empty">Keine Daten</div>';
+    return;
+  }
+  const sorted = [...rows].sort((a,b)=>a.date_str.localeCompare(b.date_str));
+
+  const canvas = document.getElementById('chart-daily-avail');
+  if (canvas) {
+    if (charts['chart-daily-avail']) charts['chart-daily-avail'].destroy();
+    charts['chart-daily-avail'] = new Chart(canvas, {
+      type:'bar',
+      data:{ labels:sorted.map(r=>r.date_str), datasets:[{
+        label:'Verfügbarkeit %',
+        data:sorted.map(r=>r.availability_percent),
+        backgroundColor:sorted.map(r=>
+          r.availability_percent>=99.9?'rgba(0,255,136,.6)':
+          r.availability_percent>=99?'rgba(255,159,67,.6)':'rgba(255,69,96,.6)'),
+        borderWidth:0, borderRadius:3,
+      }]},
+      options:{ responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ labels:{color:'#6B7E95'} } },
+        scales:{
+          x:{ ticks:{color:'#3D5166',font:{size:10}}, grid:{color:GRID} },
+          y:{ min:95, max:100, ticks:{color:'#3D5166',font:{size:10}}, grid:{color:GRID} }
+        }
+      }
+    });
+  }
+
+  const trs = rows.map(r => `
+    <tr>
+      <td class="mono">${r.date_str}</td>
+      <td class="mono" style="color:${availColor(r.availability_percent)};font-weight:600">
+        ${fmtAvail(r.availability_percent)}</td>
+      <td class="mono">${r.outage_count}</td>
+      <td class="mono">${r.isp_failure_count}</td>
+      <td class="mono">${r.local_failure_count}</td>
+      <td class="mono">${r.dns_failure_count}</td>
+      <td class="mono">${r.avg_latency_ms?.toFixed(1)||'–'}</td>
+      <td class="mono">${r.max_latency_ms?.toFixed(1)||'–'}</td>
+      <td class="mono">${r.avg_packet_loss_percent?.toFixed(1)||'–'}</td>
+    </tr>`).join('');
+  document.getElementById('daily-table').innerHTML =
+    `<table><thead><tr>
+      <th>Datum</th><th>Verfügb.</th><th>Ausfälle</th>
+      <th>ISP</th><th>Lokal</th><th>DNS</th>
+      <th>Ø Latenz</th><th>Max Latenz</th><th>Ø Verlust</th>
+    </tr></thead><tbody>${trs}</tbody></table>`;
+}
+
+// ── Boot ──
+loadOverview();
+setInterval(() => { if (currentPage === 'overview') loadOverview(); }, 30000);
+</script>
+</body>
+</html>

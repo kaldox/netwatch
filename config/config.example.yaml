@@ -1,0 +1,117 @@
+monitoring:
+  interval_seconds: 5
+  failure_threshold: 3          # Consecutive failures before event is raised
+  recovery_threshold: 3         # Consecutive successes before recovery is declared
+  ping_count: 3                 # Pings per measurement
+  ping_timeout_seconds: 5
+  dns_timeout_seconds: 5
+  traceroute_on_failure: true
+  mtr_on_failure: true
+  traceroute_repeat_interval: 60  # Seconds between repeated traceroutes during outage
+
+targets:
+  local:
+    - name: "Gateway"
+      host: "auto"              # auto = detect from routing table
+      type: "gateway"
+    - name: "Local DNS"
+      host: "127.0.0.1"
+      type: "dns"
+  public_ip:
+    - name: "Cloudflare DNS"
+      host: "1.1.1.1"
+      type: "icmp"
+    - name: "Google DNS"
+      host: "8.8.8.8"
+      type: "icmp"
+    - name: "Quad9 DNS"
+      host: "9.9.9.9"
+      type: "icmp"
+  public_domains:
+    - name: "Google"
+      host: "google.com"
+      type: "dns"
+    - name: "Cloudflare"
+      host: "cloudflare.com"
+      type: "dns"
+    - name: "GitHub"
+      host: "github.com"
+      type: "dns"
+    - name: "Wikipedia"
+      host: "wikipedia.org"
+      type: "dns"
+
+thresholds:
+  latency_warning_ms: 100
+  latency_critical_ms: 500
+  packet_loss_warning_percent: 5
+  packet_loss_critical_percent: 20
+  jitter_warning_ms: 50
+  dns_resolution_warning_ms: 200
+
+public_ip:
+  check_interval_seconds: 300
+  providers:
+    - "https://api.ipify.org?format=json"
+    - "https://api64.ipify.org?format=json"
+  ipv6_providers:
+    - "https://api6.ipify.org?format=json"
+
+speedtest:
+  enabled: true
+  interval_seconds: 900   # every 15 minutes — real download/upload throughput test
+  timeout_seconds: 30
+
+fritzbox:
+  enabled: true
+  # Router type: "fritzbox" (full DSL diagnostics: sync, SNR, attenuation,
+  # event log) | "generic_tr064" (experimental, sync rate only, for non-AVM
+  # routers that speak TR-064) | "none" (speedtest-only, no router readout).
+  vendor: "fritzbox"
+  host: "192.168.178.1"
+  timeout_seconds: 8
+  # Flag suspected throttling when measured download drops below this
+  # fraction of the FritzBox-negotiated sync rate (0.5 = below 50% of line).
+  throttle_ratio_threshold: 0.5
+  # Credentials for extended DSL diagnostics (SNR, attenuation, max rate).
+  # Leave password empty to skip the authenticated DSL readout.
+  username: "dslf-config"
+  password: ""
+  # Contracted line speed in Mbit/s for the contract-vs-actual comparison.
+  contract_download_mbps: 0    # Vertraglich vereinbarte Download-Geschwindigkeit in Mbit/s (0 = Vergleich deaktiviert)
+  contract_upload_mbps: 0      # Vertraglich vereinbarte Upload-Geschwindigkeit in Mbit/s
+
+database:
+  path: "database/netwatch.db"
+  wal_mode: true
+  vacuum_interval_days: 7
+
+logging:
+  level: "INFO"
+  max_bytes: 10485760    # 10 MB
+  backup_count: 10
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+
+reports:
+  output_dir: "reports"
+  auto_generate: true
+  generate_time: "06:00"   # HH:MM
+
+notifications:
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+    from_addr: ""
+    to_addr: ""
+    use_tls: true
