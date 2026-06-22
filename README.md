@@ -1,5 +1,7 @@
 # NetWatch
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+
 **Continuous internet-quality monitoring that pins down *where* your connection problem actually is — your wiring, your line, or your provider.**
 
 NetWatch runs 24/7 on a Raspberry Pi (or any always-on Linux box) and answers the questions you can't answer with a one-off speed test:
