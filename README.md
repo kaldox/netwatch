@@ -1,74 +1,63 @@
 # NetWatch
 
+**🇩🇪 Deutsch** · [🇬🇧 English](README.en.md) · [🐻 Baseldütsch](README.bl.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 
-**Continuous internet-quality monitoring that pins down *where* your connection problem actually is — your wiring, your line, or your provider.**
+**Durchgehende Überwachung der Internet-Qualität, die festnagelt, *wo* dein Verbindungsproblem wirklich liegt — deine Verkabelung, deine Leitung oder dein Provider.**
 
-NetWatch runs 24/7 on a Raspberry Pi (or any always-on Linux box) and answers the questions you can't answer with a one-off speed test:
+NetWatch läuft 24/7 auf einem Raspberry Pi (oder jeder Linux-Kiste, die durchläuft) und beantwortet die Fragen, die ein einmaliger Speedtest nicht beantworten kann:
 
-- Is my internet *actually* as slow as it feels — and at what times of day?
-- When it drops, is it **my** fault or the **provider's**?
-- Am I getting the speed I pay for — and if not, *why* not?
+- Ist mein Internet *tatsächlich* so langsam wie es sich anfühlt — und zu welchen Tageszeiten?
+- Wenn die Verbindung abbricht: ist das **mein** Problem oder das vom **Provider**?
+- Krieg ich die Geschwindigkeit, für die ich zahle — und wenn nicht, *warum* nicht?
 
-It does this by measuring continuously, classifying outages automatically, reading your router's own view of the line, and producing evidence you can take to your provider.
+Es misst dafür durchgehend, klassifiziert Ausfälle automatisch, liest die Sicht des Routers auf die Leitung aus und erzeugt Nachweise, die du deinem Provider vorlegen kannst.
 
-> **Note:** NetWatch was originally built around the **AVM FritzBox** (very common in German-speaking countries), which is the only fully-supported router today. Other routers work in a limited, experimental mode — see [Router support](#router-support).
-
----
-
-## Why this exists
-
-A normal speed test tells you "you have 33 Mbit/s right now." It does **not** tell you:
-
-- whether that's the provider throttling you, a bad line, or a problem inside your own home;
-- whether the device you're testing from is itself the bottleneck;
-- what your connection looked like last Tuesday at 8pm.
-
-NetWatch separates the problem into **three layers** so the cause is unambiguous:
-
-| Layer | What it checks | Example finding |
-|-------|----------------|-----------------|
-| **1. Home wiring** | The router's own cabling-defect detection | *"An in-house splice is costing ~5.4 Mbit/s"* |
-| **2. The line** | Sync rate & physical max vs. your contract | *"Line maxes out at 41.9 Mbit/s — can't deliver the contracted 50"* |
-| **3. The provider** | Measured throughput vs. what the line syncs at | *"Line syncs 36 Mbit/s, only 31 arrives"* |
-
-Crucially, it also records the **monitoring device's own load** (CPU, RAM, temperature, measurement timing) with every reading — so "your Pi was just overloaded" can be ruled out as an explanation for a bad measurement.
+> **Hinweis:** NetWatch wurde ursprünglich rund um die **AVM FritzBox** gebaut (im deutschsprachigen Raum sehr verbreitet), die als einzige heute voll unterstützt wird. Andere Router laufen in einem eingeschränkten, experimentellen Modus — siehe [Router-Unterstützung](#router-unterstützung).
 
 ---
 
-## Features
+## Warum es das gibt
 
-- **Continuous reachability monitoring** (every 5s) — gateway, public IPs, DNS, packet loss, latency, jitter
-- **Automatic outage classification** — distinguishes local-network / ISP / DNS / routing / latency / packet-loss faults with a confidence score
-- **Real throughput tests** (every 15 min) — actual download/upload against Cloudflare, not just ping
-- **Router line readout** (FritzBox via TR-064) — sync rate, physical max, SNR margin, attenuation, connection drops
-- **Router event-log parsing** — captures the router's own warnings, including in-home cabling defects
-- **Self-monitoring** — CPU / RAM / temperature / cycle-time logged per measurement to rule out the measuring device as a cause
-- **Tamper-evident storage** — append-only SQLite, per-event evidence files
-- **Local web dashboard** — dark-themed, offline-capable, with a plain-language verdict on each finding
-- **Provider evidence export** — PDF report + CSV raw data, separating the three layers cleanly
+Ein normaler Speedtest sagt dir „du hast jetzt gerade 33 Mbit/s." Er sagt dir **nicht**:
 
----
+- ob das der Provider ist, der drosselt, eine schlechte Leitung, oder ein Problem bei dir zuhause;
+- ob das Gerät, von dem du testest, selbst der Flaschenhals ist;
+- wie deine Verbindung letzten Dienstag um 20 Uhr aussah.
 
-## Screenshots
+NetWatch trennt das Problem in **drei Schichten**, damit die Ursache eindeutig ist:
 
-The dashboard runs locally at `http://<your-pi-ip>:8080`:
+| Schicht | Was geprüft wird | Beispiel-Befund |
+|---------|------------------|-----------------|
+| **1. Hausverkabelung** | Die Verkabelungsfehler-Erkennung des Routers | *„Eine Spleißstelle im Haus kostet ~5.4 Mbit/s"* |
+| **2. Die Leitung** | Sync-Rate & physikalisches Maximum gegen deinen Vertrag | *„Leitung schafft maximal 41.9 Mbit/s — kann die vertraglichen 50 nicht liefern"* |
+| **3. Der Provider** | Gemessener Durchsatz gegen das, womit die Leitung synct | *„Leitung synct 36 Mbit/s, nur 31 kommen an"* |
 
-- **Übersicht / Overview** — availability ring, current speed, public IP, recent events
-- **Geschwindigkeit / Speed** — download/upload over time with the line-sync reference, hour-of-day pattern, and the FritzBox line-comparison verdict
-- **Ereignisse / Events** — full outage history with a ⚠ flag when the Pi was under load at the time
-- **ISP-Nachweise / ISP evidence** — outages with before/during/after public IP and traceroutes
-
-*(The UI is currently in German.)*
+Entscheidend: Es erfasst auch die **eigene Last des Mess-Geräts** (CPU, RAM, Temperatur, Mess-Timing) bei jeder Messung — damit „dein Pi war einfach überlastet" als Erklärung für eine schlechte Messung ausgeschlossen werden kann.
 
 ---
 
-## Requirements
+## Funktionen
 
-- Raspberry Pi 4+ (or any always-on Linux box), wired to your router via Ethernet
-- Raspberry Pi OS / Debian (Bookworm or newer)
+- **Durchgehendes Erreichbarkeits-Monitoring** (alle 5s) — Gateway, öffentliche IPs, DNS, Paketverlust, Latenz, Jitter
+- **Automatische Ausfall-Klassifikation** — unterscheidet lokales Netz / Provider / DNS / Routing / Latenz / Paketverlust mit einem Confidence-Score
+- **Echte Durchsatz-Tests** (alle 15 Min) — tatsächlicher Down-/Upload gegen Cloudflare, nicht nur Ping
+- **Router-Leitungsdaten** (FritzBox via TR-064) — Sync-Rate, physikalisches Maximum, SNR-Abstand, Dämpfung, Verbindungsabbrüche
+- **Router-Ereignislog-Parsing** — fängt die Warnungen des Routers ab, inklusive Hausverkabelungsfehler
+- **Selbst-Monitoring** — CPU / RAM / Temperatur / Zykluszeit pro Messung, um das Mess-Gerät als Ursache auszuschließen
+- **Manipulationssicherer Speicher** — Append-only SQLite, Beweis-Dateien pro Ereignis
+- **Lokales Web-Dashboard** — dunkel, offline-fähig, mit Klartext-Bewertung zu jedem Befund
+- **Provider-Nachweisexport** — PDF-Report + CSV-Rohdaten, mit sauberer Trennung der drei Schichten
+
+---
+
+## Anforderungen
+
+- Raspberry Pi 4+ (oder jede durchlaufende Linux-Kiste), per Ethernet am Router
+- Raspberry Pi OS / Debian (Bookworm oder neuer)
 - Python 3.11+
-- For FritzBox line data: a FritzBox with TR-064 enabled (**Home Network → Network → Network Settings → "Allow access for applications"**)
+- Für FritzBox-Leitungsdaten: eine FritzBox mit aktiviertem TR-064 (**Heimnetz → Netzwerk → Netzwerkeinstellungen → „Zugriff für Anwendungen zulassen"**)
 
 ---
 
@@ -78,17 +67,17 @@ The dashboard runs locally at `http://<your-pi-ip>:8080`:
 git clone https://github.com/kaldox/netwatch.git
 cd netwatch
 
-# Copy the example config and edit it for your setup
+# Beispiel-Config kopieren und für dein Setup anpassen
 cp config/config.example.yaml config/config.yaml
-nano config/config.yaml      # set your contract speed, router host, etc.
+nano config/config.yaml      # Vertragsgeschwindigkeit, Router-Host etc. setzen
 
-# Install as a systemd service (creates a user, venv, service)
+# Als systemd-Service installieren (legt User, venv, Service an)
 sudo ./install.sh
 ```
 
-Then open `http://<your-pi-ip>:8080`.
+Dann `http://<deine-pi-ip>:8080` öffnen.
 
-### Manual / development run
+### Manueller / Entwicklungs-Lauf
 
 ```bash
 python3 -m venv venv
@@ -99,118 +88,118 @@ python -m src.main
 
 ---
 
-## Configuration
+## Konfiguration
 
-All settings live in `config/config.yaml` (copy it from `config/config.example.yaml`). Key sections:
+Alle Einstellungen liegen in `config/config.yaml` (aus `config/config.example.yaml` kopieren). Wichtige Abschnitte:
 
 ```yaml
 speedtest:
   enabled: true
-  interval_seconds: 900        # how often to run a real throughput test
+  interval_seconds: 900        # wie oft ein echter Durchsatztest läuft
 
 fritzbox:
   enabled: true
   vendor: "fritzbox"           # "fritzbox" | "generic_tr064" | "none"
   host: "192.168.178.1"
-  username: "your-fritzbox-user"
-  password: "your-fritzbox-password"   # only for extended DSL diagnostics
-  contract_download_mbps: 0    # your contracted speed (0 = comparison off)
+  username: "dein-fritzbox-user"
+  password: "dein-fritzbox-passwort"   # nur für erweiterte DSL-Diagnose
+  contract_download_mbps: 0    # deine vertragliche Geschwindigkeit (0 = Vergleich aus)
   contract_upload_mbps: 0
 ```
 
-> **Security:** Your router password is stored in `config/config.yaml`, which is git-ignored and installed with `640` permissions (root + service user only). Create a **dedicated FritzBox user** with only the permissions it needs, rather than using your admin password.
+> **Sicherheit:** Dein Router-Passwort liegt in `config/config.yaml`, die git-ignoriert ist und mit `640`-Rechten installiert wird (nur root + Service-User). Leg einen **dedizierten FritzBox-User** mit nur den nötigen Rechten an, statt dein Admin-Passwort zu nehmen.
 
 ---
 
-## The provider evidence export
+## Der Provider-Nachweisexport
 
-Once NetWatch has collected a week or two of data:
+Wenn NetWatch ein bis zwei Wochen Daten gesammelt hat:
 
 ```bash
 sudo -u netwatch /opt/netwatch/venv/bin/python -m src.export_cli 14
 ```
 
-This produces, under `reports/`:
+Das erzeugt unter `reports/`:
 
-- **`netwatch_providernachweis_<date>.pdf`** — a structured report separating home-wiring / line / provider, with a measurement-integrity statement
-- **`netwatch_speedtests_<date>.csv`** — every throughput test with the line sync alongside
-- **`netwatch_fritzbox_<date>.csv`** — line sync / max / SNR / attenuation over time
-- **`netwatch_fritzbox_log_<date>.csv`** — classified router log events (sync changes, disconnects, cabling defects)
+- **`netwatch_providernachweis_<datum>.pdf`** — strukturierter Report mit Trennung Hausverkabelung / Leitung / Provider und einer Mess-Integritäts-Erklärung
+- **`netwatch_speedtests_<datum>.csv`** — jeder Durchsatztest mit dem Leitungs-Sync daneben
+- **`netwatch_fritzbox_<datum>.csv`** — Leitungs-Sync / Max / SNR / Dämpfung über die Zeit
+- **`netwatch_fritzbox_log_<datum>.csv`** — klassifizierte Router-Log-Ereignisse (Sync-Änderungen, Abbrüche, Verkabelungsfehler)
 
-### A word on honesty
+### Ein Wort zur Ehrlichkeit
 
-This tool is designed to make an *honest* case, not to manufacture one. It explicitly surfaces problems on **your** side (in-home wiring, an overloaded measuring device) so that the part you attribute to the provider is clean and defensible. If your router reports an in-home cabling defect, fix that first — otherwise the provider will rightly point to it.
+Dieses Tool ist darauf ausgelegt, einen *ehrlichen* Fall zu machen, keinen konstruierten. Es zeigt bewusst Probleme auf **deiner** Seite (Hausverkabelung, überlastetes Mess-Gerät), damit der Teil, den du dem Provider zuschreibst, sauber und belastbar ist. Wenn dein Router einen Hausverkabelungsfehler meldet, behebe den zuerst — sonst zeigt der Provider zu Recht darauf.
 
-For a legally recognised measurement (at least in Germany), pair NetWatch's continuous record with the official **Bundesnetzagentur Breitbandmessung** desktop app. NetWatch is the long-term documentation around that snapshot.
-
----
-
-## Router support
-
-| Router | Mode | What you get |
-|--------|------|--------------|
-| **AVM FritzBox** | ✅ Full | Sync rate, physical max, SNR, attenuation, event log, cabling-defect detection |
-| Generic TR-064 | 🧪 Experimental | Sync rate + link status only (no extended diagnostics) |
-| None | ✅ Works | Full reachability + speed monitoring, no line comparison |
-
-Set this with `fritzbox.vendor` in the config. Adding a new router means implementing one small `RouterProvider` interface in `src/router.py` — **contributions very welcome.**
+Für eine rechtlich anerkannte Messung (zumindest in Deutschland) kombiniere NetWatchs durchgehende Aufzeichnung mit der offiziellen **Breitbandmessung-Desktop-App der Bundesnetzagentur**. NetWatch ist die Langzeit-Dokumentation rund um diese Momentaufnahme.
 
 ---
 
-## How outage classification works
+## Router-Unterstützung
 
-NetWatch watches all targets and, when things fail, classifies the pattern:
+| Router | Modus | Was du bekommst |
+|--------|-------|-----------------|
+| **AVM FritzBox** | ✅ Voll | Sync-Rate, physikalisches Max, SNR, Dämpfung, Ereignislog, Verkabelungsfehler-Erkennung |
+| Generisches TR-064 | 🧪 Experimentell | Nur Sync-Rate + Link-Status (keine erweiterte Diagnose) |
+| Keiner | ✅ Läuft | Volle Erreichbarkeit + Speed-Monitoring, kein Leitungsvergleich |
 
-- **Gateway unreachable** → `LOCAL_NETWORK_FAILURE` (your side)
-- **Gateway OK, all external targets down** → `ISP_FAILURE` (provider)
-- **IPs reachable, DNS fails** → `DNS_FAILURE`
-- **Partial reachability** → `ROUTING_FAILURE`
-- **Latency / packet loss over threshold** → `LATENCY_DEGRADATION` / `PACKET_LOSS`
-
-Each event records the public IP before/during/after, runs a traceroute + MTR, and snapshots the Pi's resource state — so you can tell a real outage from a measurement artefact.
+Einstellbar über `fritzbox.vendor` in der Config. Einen neuen Router hinzuzufügen heißt, ein kleines `RouterProvider`-Interface in `src/router.py` zu implementieren — **Beiträge sehr willkommen.**
 
 ---
 
-## Architecture
+## Wie die Ausfall-Klassifikation funktioniert
+
+NetWatch beobachtet alle Ziele und klassifiziert, wenn etwas ausfällt, das Muster:
+
+- **Gateway nicht erreichbar** → `LOCAL_NETWORK_FAILURE` (deine Seite)
+- **Gateway OK, alle externen Ziele weg** → `ISP_FAILURE` (Provider)
+- **IPs erreichbar, DNS scheitert** → `DNS_FAILURE`
+- **Teilweise Erreichbarkeit** → `ROUTING_FAILURE`
+- **Latenz / Paketverlust über Schwelle** → `LATENCY_DEGRADATION` / `PACKET_LOSS`
+
+Jedes Ereignis erfasst die öffentliche IP vorher/während/nachher, fährt ein Traceroute + MTR und macht einen Snapshot der Pi-Ressourcen — damit du einen echten Ausfall von einem Mess-Artefakt unterscheiden kannst.
+
+---
+
+## Architektur
 
 ```
 src/
-├── main.py          # orchestrator: measurement loop, schedulers, signal handling
-├── monitor.py       # parallel reachability/latency/DNS measurement
-├── classifier.py    # outage classification state machine
-├── speedtest.py     # Cloudflare throughput test
-├── fritzbox.py      # FritzBox TR-064 line data + event-log reader
-├── router.py        # vendor-neutral router abstraction (experimental)
-├── resources.py     # CPU/RAM/load/temperature sampling
-├── database.py      # thread-safe SQLite with automatic schema migrations
-├── statistics.py    # daily/monthly aggregation
-├── reports.py       # monthly PDF report
-├── export.py        # provider evidence export (PDF + CSV)
-├── dashboard.py     # Flask web dashboard + JSON API
-├── storage.py       # logging, CSV export, evidence files
-└── notifier.py      # optional Telegram / email alerts
+├── main.py          # Orchestrator: Messschleife, Scheduler, Signal-Handling
+├── monitor.py       # parallele Erreichbarkeit/Latenz/DNS-Messung
+├── classifier.py    # Ausfall-Klassifikations-Zustandsmaschine
+├── speedtest.py     # Cloudflare-Durchsatztest
+├── fritzbox.py      # FritzBox TR-064 Leitungsdaten + Ereignislog-Reader
+├── router.py        # herstellerneutrale Router-Abstraktion (experimentell)
+├── resources.py     # CPU/RAM/Last/Temperatur-Sampling
+├── database.py      # thread-sichere SQLite mit automatischen Schema-Migrationen
+├── statistics.py    # tägliche/monatliche Aggregation
+├── reports.py       # monatlicher PDF-Report
+├── export.py        # Provider-Nachweisexport (PDF + CSV)
+├── dashboard.py     # Flask-Web-Dashboard + JSON-API
+├── storage.py       # Logging, CSV-Export, Beweis-Dateien
+└── notifier.py      # optionale Telegram-/E-Mail-Alerts
 ```
 
-Data is stored in SQLite with WAL mode and automatic, forward-only schema migrations.
+Daten liegen in SQLite mit WAL-Modus und automatischen, nur-vorwärts laufenden Schema-Migrationen.
 
 ---
 
-## Contributing
+## Mitmachen
 
-Issues and pull requests welcome — especially:
+Issues und Pull Requests willkommen — besonders:
 
-- Router providers for non-AVM hardware (see `src/router.py`)
-- Dashboard translations (currently German)
-- Additional outage-classification heuristics
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+- Router-Provider für Nicht-AVM-Hardware (siehe `src/router.py`)
+- Dashboard-Übersetzungen (aktuell Deutsch)
+- Zusätzliche Ausfall-Klassifikations-Heuristiken
 
 ---
 
-## Disclaimer
+## Lizenz
 
-NetWatch is a measurement and documentation tool. It is not legal advice, and its output is not by itself a legally binding measurement. For formal disputes, combine it with your provider's and your national regulator's official measurement procedures.
+MIT — siehe [LICENSE](LICENSE).
+
+---
+
+## Haftungsausschluss
+
+NetWatch ist ein Mess- und Dokumentationswerkzeug. Es ist keine Rechtsberatung, und seine Ausgabe ist für sich allein keine rechtsverbindliche Messung. Für formale Streitfälle kombiniere es mit den offiziellen Messverfahren deines Providers und deiner nationalen Regulierungsbehörde.
