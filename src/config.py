@@ -62,6 +62,10 @@ class ThresholdConfig:
     packet_loss_critical_percent: float = 20.0
     jitter_warning_ms: float = 50.0
     dns_resolution_warning_ms: float = 200.0
+    # Mindestanzahl gleichzeitig betroffener Ziele, bevor ein Paketverlust-/
+    # Latenz-Event ausgeloest wird. Verhindert Rauschen durch einen einzelnen
+    # flackernden Host (z.B. Wikipedia, das ICMP rate-limitet). 1 = altes Verhalten.
+    min_affected_targets: int = 2
 
 
 @dataclass
@@ -105,6 +109,7 @@ class DatabaseConfig:
     path: str = "database/netwatch.db"
     wal_mode: bool = True
     vacuum_interval_days: int = 7
+    measurement_retention_days: int = 30   # Roh-Messwerte aelter als X Tage werden geloescht
 
 
 @dataclass
@@ -273,6 +278,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         packet_loss_critical_percent=th.get("packet_loss_critical_percent", 20),
         jitter_warning_ms=th.get("jitter_warning_ms", 50),
         dns_resolution_warning_ms=th.get("dns_resolution_warning_ms", 200),
+        min_affected_targets=th.get("min_affected_targets", 2),
     )
 
     # --- public ip ---
@@ -311,6 +317,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         path=db.get("path", "database/netwatch.db"),
         wal_mode=db.get("wal_mode", True),
         vacuum_interval_days=db.get("vacuum_interval_days", 7),
+        measurement_retention_days=db.get("measurement_retention_days", 30),
     )
 
     # --- logging ---

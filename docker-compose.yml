@@ -1,0 +1,28 @@
+services:
+  netwatch:
+    build: .
+    image: netwatch:latest
+    container_name: netwatch
+    restart: unless-stopped
+
+    # Host networking is required: NetWatch reads the host's default gateway
+    # and network interface and talks to the FritzBox directly. Without this
+    # it would only see Docker's internal bridge network.
+    network_mode: host
+
+    # ICMP ping and mtr need raw sockets.
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+
+    environment:
+      - TZ=Europe/Zurich
+
+    # Persist config + data on the host. Point these at your existing
+    # /opt/netwatch folders to keep all history (see DEPLOY-DOCKER.md).
+    volumes:
+      - ./config:/app/config
+      - ./database:/app/database
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports

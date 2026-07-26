@@ -2,7 +2,7 @@ monitoring:
   interval_seconds: 5
   failure_threshold: 3          # Consecutive failures before event is raised
   recovery_threshold: 3         # Consecutive successes before recovery is declared
-  ping_count: 3                 # Pings per measurement
+  ping_count: 5                 # Pings per measurement (5+ = aussagekraeftigerer Paketverlust)
   ping_timeout_seconds: 5
   dns_timeout_seconds: 5
   traceroute_on_failure: true
@@ -48,6 +48,7 @@ thresholds:
   packet_loss_critical_percent: 20
   jitter_warning_ms: 50
   dns_resolution_warning_ms: 200
+  min_affected_targets: 2       # Event erst, wenn >=2 Ziele gleichzeitig betroffen (1 = altes Verhalten)
 
 public_ip:
   check_interval_seconds: 300

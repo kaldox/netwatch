@@ -145,11 +145,13 @@ class Classifier:
         recovery_threshold: int = 3,
         latency_critical_ms: float = 500.0,
         packet_loss_critical_percent: float = 20.0,
+        min_affected_targets: int = 2,
     ) -> None:
         self.failure_threshold = failure_threshold
         self.recovery_threshold = recovery_threshold
         self.latency_critical_ms = latency_critical_ms
         self.packet_loss_critical_percent = packet_loss_critical_percent
+        self.min_affected_targets = min_affected_targets
 
         # Per-target state machines
         self._target_states: dict[str, TargetState] = {}
@@ -375,7 +377,7 @@ class Classifier:
             if r.latency_ms is not None
             and r.latency_ms > self.latency_critical_ms
         ]
-        if high_latency_targets:
+        if len(high_latency_targets) >= self.min_affected_targets:
             if type_key not in self.active_events:
                 worst = max(high_latency_targets, key=lambda r: r.latency_ms or 0)
                 ev = self._make_event(
@@ -407,7 +409,7 @@ class Classifier:
             if r.packet_loss_percent > self.packet_loss_critical_percent
             and r.reachable  # some packets got through
         ]
-        if high_loss_targets:
+        if len(high_loss_targets) >= self.min_affected_targets:
             if type_key not in self.active_events:
                 worst = max(high_loss_targets, key=lambda r: r.packet_loss_percent)
                 ev = self._make_event(

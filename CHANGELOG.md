@@ -12,3 +12,11 @@
 - Optionale Telegram/E-Mail-Benachrichtigungen
 
 ## [Unreleased]
+### Behoben
+- DB-Aufblähung: `measurements`-Tabelle wird jetzt nach `measurement_retention_days` (Standard 30) gekürzt; VACUUM läuft danach
+- Event-Rauschen: Paketverlust-/Latenz-Events erst ab `min_affected_targets` (Standard 2) gleichzeitig betroffenen Zielen
+- Monats-Report wird durch `reports.auto_generate`/`generate_time` nun tatsächlich automatisch erzeugt (vorher ignoriert)
+
+### Hinzugefügt
+- Docker-Support: `Dockerfile`, `docker-compose.yml` (Host-Netzwerk), `.dockerignore`, `DEPLOY-DOCKER.md`
+- Config: `database.measurement_retention_days`, `thresholds.min_affected_targets`

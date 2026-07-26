@@ -760,6 +760,19 @@ class Database:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    def prune_measurements(self, before_timestamp: str) -> int:
+        """Delete raw measurements older than the given ISO timestamp.
+        Returns number of rows deleted. The measurements table is the
+        fastest-growing table (one row per target every cycle); daily
+        aggregates live in daily_statistics, so old raw rows can be pruned
+        without losing the long-term availability record."""
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM measurements WHERE timestamp < ?",
+                (before_timestamp,),
+            )
+            return cur.rowcount
+
     def prune_system_resources(self, before_timestamp: str) -> int:
         """Delete resource samples older than the given ISO timestamp.
         Returns number of rows deleted. Keeps the table from growing

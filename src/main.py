@@ -73,12 +73,14 @@ class NetWatch:
             recovery_threshold=self.cfg.monitoring.recovery_threshold,
             latency_critical_ms=self.cfg.thresholds.latency_critical_ms,
             packet_loss_critical_percent=self.cfg.thresholds.packet_loss_critical_percent,
+            min_affected_targets=self.cfg.thresholds.min_affected_targets,
         )
         self.notifier = Notifier(self.cfg.notifications)
 
         self._stop_event = threading.Event()
         self._last_public_ip_check = 0.0
         self._last_daily_stats = ""   # date string of last computed stats
+        self._last_report_date = ""   # date string of last auto-generated report
         self._last_traceroute_time: dict[str, float] = {}
         self._last_vacuum_date = ""
 
@@ -434,9 +436,13 @@ class NetWatch:
         if self._last_vacuum_date != today:
             self._last_vacuum_date = today
             try:
-                self.db.vacuum()
+                retention = self.cfg.database.measurement_retention_days
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=retention)).isoformat()
+                deleted = self.db.prune_measurements(cutoff)
+                if deleted:
+                    logger.info("Pruned %d old measurement rows (>%d days)", deleted, retention)
             except Exception as exc:
-                logger.error("Vacuum failed: %s", exc)
+                logger.error("measurements pruning failed: %s", exc)
             try:
                 cutoff = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
                 deleted = self.db.prune_system_resources(cutoff)
@@ -451,6 +457,11 @@ class NetWatch:
                     logger.info("Pruned %d old fritzbox_status rows (>90 days)", deleted)
             except Exception as exc:
                 logger.error("fritzbox_status pruning failed: %s", exc)
+            # VACUUM last, so pages freed by the prunes above are reclaimed now
+            try:
+                self.db.vacuum()
+            except Exception as exc:
+                logger.error("Vacuum failed: %s", exc)
 
     # ------------------------------------------------------------------
     # PDF report generation
@@ -487,6 +498,32 @@ class NetWatch:
             ip_history=ip_history,
         )
         logger.info("Monthly report generated: %s", out_path)
+
+    # ------------------------------------------------------------------
+    # Automatic report scheduling
+    # ------------------------------------------------------------------
+
+    def _maybe_generate_report(self) -> None:
+        """Generate the monthly PDF report once per day, at or after the
+        configured generate_time. Reads reports.auto_generate / generate_time
+        from the config (previously these settings were ignored)."""
+        if not self.cfg.reports.auto_generate:
+            return
+        now = datetime.now()
+        today_str = now.date().isoformat()
+        if self._last_report_date == today_str:
+            return
+        try:
+            hh, mm = (int(x) for x in self.cfg.reports.generate_time.split(":"))
+        except Exception:
+            hh, mm = 6, 0
+        if (now.hour, now.minute) < (hh, mm):
+            return
+        self._last_report_date = today_str
+        try:
+            self._generate_monthly_report(now.year, now.month)
+        except Exception as exc:
+            logger.error("Auto report generation failed: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
     # Dashboard
@@ -709,6 +746,7 @@ class NetWatch:
                 # Every ~100 cycles: maintenance tasks
                 if cycle % 100 == 0:
                     self._compute_daily_stats_if_needed()
+                    self._maybe_generate_report()
 
                 # Once per day: vacuum
                 if cycle % (86400 // max(1, self.cfg.monitoring.interval_seconds)) == 0:

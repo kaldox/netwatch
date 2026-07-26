@@ -1,0 +1,12 @@
+.git/
+venv/
+tests/
+database/
+data/
+logs/
+reports/
+*.pyc
+__pycache__/
+*.db
+*.db-wal
+*.db-shm
