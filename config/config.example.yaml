@@ -79,8 +79,14 @@ fritzbox:
   username: "dslf-config"
   password: ""
   # Contracted line speed in Mbit/s for the contract-vs-actual comparison.
-  contract_download_mbps: 0    # Vertraglich vereinbarte Download-Geschwindigkeit in Mbit/s (0 = Vergleich deaktiviert)
-  contract_upload_mbps: 0      # Vertraglich vereinbarte Upload-Geschwindigkeit in Mbit/s
+  # Vertragswerte aus dem Produktinformationsblatt / der Vertragszusammenfassung.
+  # Regulatoren (z.B. DE Bundesnetzagentur) bewerten drei Werte. 0 = nicht gesetzt.
+  contract_download_mbps: 0            # MAXIMUM Download in Mbit/s (0 = Vergleich aus)
+  contract_upload_mbps: 0              # MAXIMUM Upload in Mbit/s
+  contract_normal_download_mbps: 0     # "normalerweise zur Verfuegung stehend" Download
+  contract_min_download_mbps: 0        # Minimum Download
+  contract_normal_upload_mbps: 0       # "normalerweise zur Verfuegung stehend" Upload
+  contract_min_upload_mbps: 0          # Minimum Upload
 
 database:
   path: "database/netwatch.db"

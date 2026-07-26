@@ -100,8 +100,15 @@ class FritzBoxConfig:
     password: str = ""
     # Contracted line speed (Mbit/s) for the contract-vs-actual comparison.
     # 0 disables the contract comparison.
-    contract_download_mbps: float = 0.0
-    contract_upload_mbps: float = 0.0
+    contract_download_mbps: float = 0.0   # vertragl. MAXIMUM Download (Produktinfoblatt)
+    contract_upload_mbps: float = 0.0     # vertragl. MAXIMUM Upload
+    # Zusaetzliche Vertragswerte aus dem Produktinformationsblatt / der
+    # Vertragszusammenfassung, wie sie Regulatoren zur Bewertung heranziehen
+    # (0 = nicht gesetzt / Kriterium wird uebersprungen):
+    contract_normal_download_mbps: float = 0.0   # "normalerweise zur Verfuegung stehend"
+    contract_min_download_mbps: float = 0.0      # vertragl. Minimum
+    contract_normal_upload_mbps: float = 0.0
+    contract_min_upload_mbps: float = 0.0
 
 
 @dataclass
@@ -309,6 +316,10 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         password=fb.get("password", ""),
         contract_download_mbps=fb.get("contract_download_mbps", 0.0),
         contract_upload_mbps=fb.get("contract_upload_mbps", 0.0),
+        contract_normal_download_mbps=fb.get("contract_normal_download_mbps", 0.0),
+        contract_min_download_mbps=fb.get("contract_min_download_mbps", 0.0),
+        contract_normal_upload_mbps=fb.get("contract_normal_upload_mbps", 0.0),
+        contract_min_upload_mbps=fb.get("contract_min_upload_mbps", 0.0),
     )
 
     # --- database ---
