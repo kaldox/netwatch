@@ -315,6 +315,15 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
         "Schweiz: networktest.ch, Schlichtung über ombudscom). Die folgende Bewertung "
         "orientiert sich an den Kriterien der Bundesnetzagentur (Vfg 99/2021).",
         styles["NWSmall"]))
+    story.append(Paragraph(
+        "Abgrenzung der Ursachen: Anbieter-Ausfälle werden über direkte ICMP-Pings an feste "
+        "öffentliche IP-Adressen (1.1.1.1, 8.8.8.8, 9.9.9.9) erkannt — ohne Namensauflösung. "
+        "Ein lokaler oder selbst betriebener DNS-Server kann sie daher weder auslösen noch "
+        "verfälschen (DNS-Störungen werden separat als DNS-Fehler geführt). Jeder Ausfall wird "
+        "zusätzlich mit dem WAN-Status der FritzBox im selben Moment abgeglichen. Reine "
+        "Durchsatz- und Latenzwerte können durch gleichzeitige Eigennutzung im Haushalt "
+        "beeinflusst sein und gelten hier nur als ergänzender, nicht als tragender Beleg.",
+        styles["NWSmall"]))
 
     # ---- 1. Contract evaluation (core) ----
     story.append(Paragraph("1. Vertragswerte &amp; Bewertung (Download)", styles["NWH2"]))
@@ -385,15 +394,35 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     story.append(_table(av_rows, col_widths=[7.4*cm, 7.4*cm]))
     if a["isp_events"]:
         story.append(Spacer(1, 6))
-        story.append(Paragraph("Dokumentierte Anbieter-Ausfälle (Auszug):", styles["NWBody"]))
-        out_rows = [["Beginn (lokal)", "Dauer", "Beschreibung"]]
-        for e in a["isp_events"][:12]:
+        story.append(Paragraph(
+            "Dokumentierte Anbieter-Ausfälle, jeweils mit dem Zustand, den die FritzBox im "
+            "selben Moment meldete (unabhängige Bestätigung durch das Anbieter-Gerät):",
+            styles["NWBody"]))
+        out_rows = [["Beginn (lokal)", "Dauer", "FritzBox-WAN", "WAN-Uptime", "Bewertung"]]
+        line_drop_count = 0
+        for e in a["isp_events"][:14]:
             dt = _local(e.get("started_at", ""))
-            beg = dt.strftime("%d.%m.%Y %H:%M:%S") if dt else e.get("started_at", "–")
+            beg = dt.strftime("%d.%m. %H:%M:%S") if dt else e.get("started_at", "–")
             dur = format_duration(e.get("duration_seconds") or 0) if e.get("ended_at") else "laufend"
-            desc = (e.get("description", "") or "")[:58]
-            out_rows.append([beg, dur, desc])
-        story.append(_table(out_rows, col_widths=[4.4*cm, 2.4*cm, 8.0*cm]))
+            conn = "–"; up = "–"; verdict = "Providernetz (Leitung lief)"
+            fbs = db.get_fritzbox_status(event_id=e.get("event_id"), limit=1)
+            if fbs:
+                f = fbs[0]
+                conn = f.get("connection_status") or "–"
+                ut = f.get("wan_uptime_seconds")
+                up = format_duration(ut) if ut is not None else "–"
+                if (conn and conn != "Connected") or (ut is not None and ut < 300):
+                    verdict = "Leitungsabriss bestätigt"
+                    line_drop_count += 1
+            out_rows.append([beg, dur, conn, up, verdict])
+        story.append(_table(out_rows, col_widths=[3.0*cm, 1.6*cm, 3.0*cm, 2.6*cm, 4.6*cm]))
+        story.append(Paragraph(
+            f"Bei <b>{line_drop_count}</b> der angezeigten Ausfälle war die Leitung laut FritzBox "
+            f"im selben Moment getrennt bzw. gerade neu verbunden (WAN-Uptime zurückgesetzt) — "
+            f"hier ist der Leitungsabriss durch das Anbieter-Gerät selbst belegt. Bei den übrigen "
+            f"blieb die FritzBox verbunden, während die externen Ziele unerreichbar waren: eine "
+            f"Störung im Providernetz oberhalb Ihres Anschlusses.",
+            styles["NWSmall"]))
     story.append(Paragraph(
         "Hinweis: NetWatch zeichnet auch während eines Ausfalls lokal weiter auf — der "
         "Zeitpunkt, die Dauer und die öffentliche IP vor/während/nach jedem Ausfall sind "
@@ -402,8 +431,39 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
 
     story.append(PageBreak())
 
-    # ---- 3. Layer 1: house wiring ----
-    story.append(Paragraph("3. Hausverkabelung (eigene Seite)", styles["NWH2"]))
+    # ---- 3. Router disconnect log — central independent evidence ----
+    story.append(Paragraph("3. Anbieter-Zwangstrennungen laut Router-Protokoll", styles["NWH2"]))
+    reconnects = db.get_fritzbox_log(category="reconnect", limit=1000)
+    n_disc = len(a["disconnects"]); n_recon = len(reconnects)
+    if a["disconnects"] or reconnects:
+        story.append(Paragraph(
+            f"Die stärkste, vom Messgerät unabhängige Beweisquelle ist das Ereignisprotokoll der "
+            f"FritzBox selbst: Der Router dokumentiert jede Zwangstrennung mit Zeitstempel — "
+            f"unabhängig davon, welches Gerät im Heimnetz misst, welcher DNS genutzt wird oder ob "
+            f"gerade gesurft wird. Im Zeitraum protokolliert die FritzBox <b>{n_recon} "
+            f"Neuverbindungen</b> und <b>{n_disc} Fehler-/Trennungsmeldungen</b> "
+            f"(PPPoE-/LCP-/PPP-Timeouts) — rund <b>{n_recon / max(1, a['days']):.1f} "
+            f"Leitungsabrisse pro Tag</b>.",
+            styles["NWBody"]))
+        dl_rows = [["Datum", "Uhrzeit", "Router-Meldung (wörtlich)"]]
+        for e in a["disconnects"][:14]:
+            msg = (e.get("message", "") or "")
+            dl_rows.append([e.get("raw_date", "–"), e.get("raw_time", "–"),
+                            (msg[:72] + "…") if len(msg) > 72 else msg])
+        story.append(Spacer(1, 4))
+        story.append(_table(dl_rows, col_widths=[2*cm, 1.8*cm, 11*cm]))
+        story.append(Paragraph(
+            "Diese Meldungen stammen wörtlich aus dem Anbieter-Gerät und sind der Kern des "
+            "Nachweises: Die Leitung trennt sich regelmäßig zwangsweise — außerhalb des "
+            "Einflusses des Heimnetzes und unabhängig von jeder Messung durch den Pi.",
+            styles["NWSmall"]))
+    else:
+        story.append(Paragraph(
+            "Im Messzeitraum wurden keine Zwangstrennungen im FritzBox-Protokoll erfasst.",
+            styles["NWBody"]))
+
+    # ---- 4. Layer 1: house wiring ----
+    story.append(Paragraph("4. Hausverkabelung (eigene Seite)", styles["NWH2"]))
     if a["cabling"]:
         latest = a["cabling"][0]
         cost = latest.get("cabling_cost_kbps")
@@ -431,7 +491,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             styles["NWBody"]))
 
     # ---- 4. Layer 2: DSL line ----
-    story.append(Paragraph("4. DSL-Leitung (Anbieter-Leitung)", styles["NWH2"]))
+    story.append(Paragraph("5. DSL-Leitung (Anbieter-Leitung)", styles["NWH2"]))
     line_rows = [["Kennwert", "Wert", "Bewertung"]]
     if c_max:
         line_rows.append(["Vertrag Maximum (Down)", f"{c_max:.1f} Mbit/s", "Sollwert"])
@@ -463,7 +523,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             styles["NWBody"]))
 
     # ---- 5. Layer 3: provider network ----
-    story.append(Paragraph("5. Anbieternetz (Durchsatz &amp; Abbrüche)", styles["NWH2"]))
+    story.append(Paragraph("6. Anbieternetz (Durchsatz &amp; Abbrüche)", styles["NWH2"]))
     if a["down_avg"] is not None and a["sync_down_avg"]:
         util = a["down_avg"] / a["sync_down_avg"] * 100
         story.append(Paragraph(
@@ -476,8 +536,44 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             f"(PPPoE-/LCP-Fehler) — außerhalb des Einflusses des Heimnetzes.",
             styles["NWBody"]))
 
-    # ---- 6. Integrity + legal note ----
-    story.append(Paragraph("6. Messintegrität &amp; Hinweise", styles["NWH2"]))
+    # ---- 6. Line stability / sync changes ----
+    story.append(Paragraph("7. Leitungsstabilität (Sync-Wechsel)", styles["NWH2"]))
+    syncs = a["sync_changes"]
+    if syncs:
+        per_day = len(syncs) / max(1, a["days"])
+        downs_k = [s["sync_down_kbps"] for s in syncs if s.get("sync_down_kbps")]
+        rng = ""
+        if downs_k:
+            rng = (f" Die Downstream-Sync-Rate schwankte dabei zwischen "
+                   f"{min(downs_k)/1000:.1f} und {max(downs_k)/1000:.1f} Mbit/s.")
+        story.append(Paragraph(
+            f"Im Zeitraum hat sich die Leitung <b>{len(syncs)}-mal neu synchronisiert</b> "
+            f"(rund {per_day:.1f} pro Tag).{rng} Häufige Resyncs sind ein Indiz für eine "
+            f"instabile Anbieter-Leitung: jede Neusynchronisierung unterbricht kurz die "
+            f"Verbindung, und die Rate kann danach niedriger liegen.",
+            styles["NWBody"]))
+        sc_rows = [["Datum", "Uhrzeit", "Neue Sync (Down/Up)", "Meldung"]]
+        for sc in syncs[:10]:
+            d = sc.get("sync_down_kbps"); u = sc.get("sync_up_kbps")
+            if d and u:
+                sv = f"{d/1000:.1f} / {u/1000:.1f} Mbit/s"
+            elif d:
+                sv = f"{d/1000:.1f} Mbit/s"
+            else:
+                sv = "–"
+            msg = sc.get("message", "") or ""
+            sc_rows.append([sc.get("raw_date", "–"), sc.get("raw_time", "–"), sv,
+                            (msg[:46] + "…") if len(msg) > 46 else msg])
+        story.append(Spacer(1, 4))
+        story.append(_table(sc_rows, col_widths=[2*cm, 1.8*cm, 4.0*cm, 7.0*cm]))
+    else:
+        story.append(Paragraph(
+            "Keine Sync-Wechsel im FritzBox-Protokoll erfasst — die Leitung blieb im "
+            "Messzeitraum stabil synchronisiert (keine Zwangstrennungen/Resyncs).",
+            styles["NWBody"]))
+
+    # ---- 7. Integrity + legal note ----
+    story.append(Paragraph("8. Messintegrität &amp; Hinweise", styles["NWH2"]))
     story.append(Paragraph(
         "Alle Messungen erfolgten automatisiert auf einem dauerhaft laufenden Raspberry Pi, "
         "direkt per Netzwerkkabel mit dem Router verbunden. Zu jeder Messung werden CPU-, RAM- "

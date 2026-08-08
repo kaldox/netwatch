@@ -164,6 +164,7 @@ class Classifier:
         self._gateway_ip: Optional[str] = None
         self._network_interface: Optional[str] = None
         self._hostname: str = socket.gethostname()
+        self._gateway_fail_streak: int = 0
 
     # ------------------------------------------------------------------
 
@@ -251,7 +252,16 @@ class Classifier:
             self._state(r.target_name).update(r.reachable)
 
         gateway_reachable = results[0].gateway_reachable
-        local_failing = not gateway_reachable
+        # Require the gateway to fail for `failure_threshold` consecutive
+        # cycles before declaring a local-network failure. A single dropped
+        # gateway ping (brief ICMP rate-limiting / hiccup) must not raise a
+        # false LOCAL_NETWORK_FAILURE — a real local outage persists across
+        # several cycles, exactly like the ISP-failure detection.
+        if gateway_reachable:
+            self._gateway_fail_streak = 0
+        else:
+            self._gateway_fail_streak += 1
+        local_failing = self._gateway_fail_streak >= self.failure_threshold
 
         public_ip_failing_count = sum(
             1 for r in public_ip_results
@@ -275,7 +285,7 @@ class Classifier:
 
         # ---- LOCAL NETWORK FAILURE -----------------------------------
         type_key = EventType.LOCAL_NETWORK_FAILURE.value
-        if local_failing and not gateway_reachable:
+        if local_failing:
             if type_key not in self.active_events:
                 ev = self._make_event(
                     EventType.LOCAL_NETWORK_FAILURE,

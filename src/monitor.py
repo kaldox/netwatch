@@ -181,7 +181,11 @@ def ping(host: str, count: int = 3, timeout: int = 5) -> PingResult:
     system = platform.system().lower()
 
     if system == "linux":
-        cmd = ["ping", "-c", str(count), "-W", str(timeout), host]
+        # -i 0.2 sends packets 0.2s apart instead of the default 1s, so a
+        # ping with count=5 finishes in ~1s rather than ~4s. This keeps the
+        # measurement cycle well under the 5s interval and avoids
+        # false-positive "gateway unreachable" events from cycle overruns.
+        cmd = ["ping", "-c", str(count), "-i", "0.2", "-W", str(timeout), host]
     elif system == "darwin":
         cmd = ["ping", "-c", str(count), "-t", str(timeout), host]
     else:
@@ -424,7 +428,7 @@ class NetworkMonitor:
         if gw_reachable is None:
             gw_reachable = False
             if gw:
-                gw_ping = ping(gw, count=1, timeout=self.ping_timeout)
+                gw_ping = ping(gw, count=3, timeout=self.ping_timeout)
                 gw_reachable = gw_ping.reachable
 
         if target_type == "dns":
@@ -496,7 +500,7 @@ class NetworkMonitor:
         gw = self.gateway
         gw_reachable = False
         if gw:
-            gw_ping = ping(gw, count=1, timeout=self.ping_timeout)
+            gw_ping = ping(gw, count=3, timeout=self.ping_timeout)
             gw_reachable = gw_ping.reachable
 
         results: list[MeasurementResult] = []
