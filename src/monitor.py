@@ -390,6 +390,7 @@ class NetworkMonitor:
         target_host: str,
         target_type: str,
         gw_reachable: Optional[bool] = None,
+        nameserver: Optional[str] = None,
     ) -> MeasurementResult:
         """
         Run a single measurement for one target.
@@ -399,6 +400,12 @@ class NetworkMonitor:
         cycle (measured once via measure_all(), not per-target). If None,
         falls back to pinging the gateway here (used by callers that measure
         a single target in isolation).
+
+        nameserver: for "dns" targets, the DNS server to query directly. If
+        None, falls back to the system resolver — which may be a locally
+        run resolver (AdGuard/Pi-hole) rather than a neutral third party.
+        Always set this for targets meant to serve as provider-facing
+        evidence (see TargetConfig.nameserver).
         """
         now = datetime.now(timezone.utc).isoformat()
         gw = self.gateway
@@ -432,8 +439,10 @@ class NetworkMonitor:
                 gw_reachable = gw_ping.reachable
 
         if target_type == "dns":
-            # DNS measurement: resolve the hostname
-            dns_result = resolve_dns(host, timeout=self.dns_timeout)
+            # DNS measurement: resolve the hostname. Query the configured
+            # nameserver directly when given, instead of the system
+            # resolver — see the nameserver docstring above.
+            dns_result = resolve_dns(host, nameserver=nameserver, timeout=self.dns_timeout)
             # Also ping if it's a public domain (to get latency)
             ping_result = None
             if target_type == "dns" and "." in host:
@@ -481,7 +490,7 @@ class NetworkMonitor:
 
     def measure_all(
         self,
-        targets: list[tuple[str, str, str]],  # (name, host, type)
+        targets: list[tuple[str, str, str, Optional[str]]],  # (name, host, type, nameserver)
         max_workers: int = 8,
     ) -> list[MeasurementResult]:
         """
@@ -507,9 +516,9 @@ class NetworkMonitor:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             future_map = {
                 pool.submit(
-                    self.measure_target, name, host, ttype, gw_reachable
+                    self.measure_target, name, host, ttype, gw_reachable, nameserver
                 ): (name, host, ttype)
-                for name, host, ttype in targets
+                for name, host, ttype, nameserver in targets
             }
             for future in as_completed(future_map):
                 name, host, ttype = future_map[future]
@@ -539,6 +548,6 @@ class NetworkMonitor:
         # Preserve original target order for downstream consumers/tests.
         # Keyed by target_name only — target_host may have been resolved
         # from "auto" to a concrete gateway IP inside measure_target().
-        order = {name: i for i, (name, _, _) in enumerate(targets)}
+        order = {name: i for i, (name, _, _, _) in enumerate(targets)}
         results.sort(key=lambda r: order.get(r.target_name, 0))
         return results

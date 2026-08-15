@@ -174,6 +174,22 @@ def _analyse(db: Database, cfg: AppConfig, days: int) -> dict[str, Any]:
     events = db.get_events(start=start, end=end, limit=5000)
     isp_events = [e for e in events if e.get("event_type") == "ISP_FAILURE"]
     local_events = [e for e in events if e.get("event_type") == "LOCAL_NETWORK_FAILURE"]
+    dns_events = [e for e in events if e.get("event_type") == "DNS_FAILURE"]
+
+    # Self-diagnostic: local resolver (AdGuard/Pi-hole/etc.) reachability,
+    # quantified separately from the externally-resolved DNS checks. Any
+    # "dns"-type target configured under targets.local is treated as a
+    # local-resolver probe (see config.example.yaml).
+    local_dns_stats = []
+    for t in cfg.targets_local:
+        if t.type != "dns":
+            continue
+        failures, total = db.get_target_reachability(t.name, start, end)
+        if total:
+            local_dns_stats.append({
+                "name": t.name, "failures": failures, "total": total,
+                "percent": failures / total * 100,
+            })
 
     daily = db.get_daily_stats(start=(now - timedelta(days=days)).date().isoformat(),
                                end=now.date().isoformat())
@@ -185,6 +201,8 @@ def _analyse(db: Database, cfg: AppConfig, days: int) -> dict[str, Any]:
     avails = [d.get("availability_percent") for d in daily
               if d.get("availability_percent") is not None]
     avg_avail = sum(avails) / len(avails) if avails else None
+
+    interfaces_seen = sorted(db.get_network_interfaces_seen(start, end))
 
     def avg(a): return sum(a) / len(a) if a else None
 
@@ -201,7 +219,8 @@ def _analyse(db: Database, cfg: AppConfig, days: int) -> dict[str, Any]:
         "fb_latest": fb_latest,
         "sync_down_avg": avg(sync_downs),
         "cabling": cabling, "disconnects": disconnects, "sync_changes": sync_changes,
-        "isp_events": isp_events, "local_events": local_events,
+        "isp_events": isp_events, "local_events": local_events, "dns_events": dns_events,
+        "local_dns_stats": local_dns_stats, "interfaces_seen": interfaces_seen,
         "total_downtime": total_downtime, "total_outages": total_outages,
         "isp_outage_days": isp_outage_days, "longest_outage": longest_outage,
         "avg_avail": avg_avail,
@@ -318,11 +337,15 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     story.append(Paragraph(
         "Abgrenzung der Ursachen: Anbieter-Ausfälle werden über direkte ICMP-Pings an feste "
         "öffentliche IP-Adressen (1.1.1.1, 8.8.8.8, 9.9.9.9) erkannt — ohne Namensauflösung. "
-        "Ein lokaler oder selbst betriebener DNS-Server kann sie daher weder auslösen noch "
-        "verfälschen (DNS-Störungen werden separat als DNS-Fehler geführt). Jeder Ausfall wird "
-        "zusätzlich mit dem WAN-Status der FritzBox im selben Moment abgeglichen. Reine "
-        "Durchsatz- und Latenzwerte können durch gleichzeitige Eigennutzung im Haushalt "
-        "beeinflusst sein und gelten hier nur als ergänzender, nicht als tragender Beleg.",
+        "Ein lokaler oder selbst betriebener DNS-Server (z. B. AdGuard, Pi-hole) kann sie daher "
+        "weder auslösen noch verfälschen. Die ergänzenden DNS-Checks auf öffentliche Domains "
+        "fragen ebenfalls feste, unabhängige Nameserver (1.1.1.1, 8.8.8.8, 9.9.9.9) direkt per "
+        "IP ab — nicht den auf dem Messgerät konfigurierten Resolver. Der lokale Resolver selbst "
+        "wird als eigener, gesondert ausgewiesener Diagnose-Ziel geführt, der nicht in die "
+        "Anbieter-Bewertung einfließt (Details: Kapitel 8). Jeder Ausfall wird zusätzlich mit "
+        "dem WAN-Status der FritzBox im selben Moment abgeglichen. Reine Durchsatz- und "
+        "Latenzwerte können durch gleichzeitige Eigennutzung im Haushalt beeinflusst sein und "
+        "gelten hier nur als ergänzender, nicht als tragender Beleg.",
         styles["NWSmall"]))
 
     # ---- 1. Contract evaluation (core) ----
@@ -581,6 +604,83 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
         "Verfälschung durch Überlastung auszuschließen. Die Leitungswerte stammen unmittelbar "
         "aus dem Router (TR-064). Die Rohdaten liegen als CSV-Dateien bei und sind nachprüfbar.",
         styles["NWBody"]))
+
+    story.append(Paragraph(
+        "Ausschluss eigener Ursachen: Die folgenden, in der Praxis häufig vorgebrachten "
+        "Einwände sind durch die Messmethodik bereits berücksichtigt und ausgeschlossen:",
+        styles["NWBody"]))
+    excl_rows = [["Möglicher Einwand", "Warum ausgeschlossen"]]
+    excl_rows.append([
+        "Fehler im Heimnetz (Kabel, Switch, Router-LAN)",
+        "Gateway-Erreichbarkeit wird pro Zyklus separat geprüft; Ausfälle laufen als "
+        "LOCAL_NETWORK_FAILURE und zählen nicht als Anbieter-Ausfall (Kapitel 2).",
+    ])
+    excl_rows.append([
+        "Lokaler DNS-Server (z. B. AdGuard, Pi-hole)",
+        "Anbieter-Ausfallerkennung nutzt ausschließlich IP-basierte ICMP-Checks ohne "
+        "Namensauflösung. Die DNS-Checks auf öffentliche Domains fragen feste externe "
+        "Nameserver direkt per IP ab, nicht den lokalen Resolver. Der lokale Resolver läuft "
+        "als eigenes, getrennt ausgewertetes Diagnose-Ziel (Zahlen unten) und geht nicht in "
+        "ISP- oder DNS-Ausfallwertung ein.",
+    ])
+    excl_rows.append([
+        "Andere Dienste/Container auf demselben Gerät (z. B. Docker, Ressourcenlast)",
+        "CPU-, RAM- und Lastmittel werden je Messzyklus auf Systemebene erfasst — das "
+        "erfasst die Gesamtlast des Geräts unabhängig davon, welcher Prozess sie verursacht "
+        "— und jedem Ereignis direkt zugeordnet. Die Messzykluszeit wird überwacht, damit ein "
+        "überlastetes Gerät nicht als Netzausfall fehlinterpretiert wird.",
+    ])
+    ifaces = a["interfaces_seen"]
+    wifi_ifaces = [i for i in ifaces if i.lower().startswith(("wl", "wifi"))]
+    if ifaces:
+        if wifi_ifaces:
+            wlan_note = (
+                f"<b>Achtung:</b> Im Zeitraum wurde das WLAN-Interface "
+                f"{', '.join(wifi_ifaces)} beobachtet — die Kabelgebunden-Annahme trifft "
+                f"für diesen Zeitraum nicht uneingeschränkt zu."
+            )
+        else:
+            wlan_note = (
+                f"Im Messzeitraum durchgehend über {', '.join(ifaces)} gemessen — "
+                f"kein WLAN-Interface beobachtet."
+            )
+    else:
+        wlan_note = (
+            "Messgerät ist als Betriebsvoraussetzung kabelgebunden direkt am Router "
+            "angeschlossen (siehe Kopfzeile dieses Berichts)."
+        )
+    excl_rows.append(["WLAN-Probleme zum Router", wlan_note])
+    excl_rows.append([
+        "Eigener Router-Neustart statt Anbieterstörung",
+        "Das Router-Protokoll wird nach providerseitigen Symptomen klassifiziert "
+        "(PPPoE-/LCP-Fehler, gescheiterte Anmeldung, PPP-Timeout, Kapitel 3); ein manueller "
+        "Neustart erzeugt andere Meldungen und wird hier nicht mitgezählt.",
+    ])
+    excl_rows.append([
+        "Eigene gleichzeitige Auslastung der Leitung (Streaming, Downloads)",
+        "Die Ausfallerkennung basiert auf reiner Erreichbarkeit, nicht auf Durchsatz; "
+        "Durchsatzwerte fließen nur als ergänzender, nicht als tragender Beleg ein.",
+    ])
+    story.append(Spacer(1, 4))
+    story.append(_table(excl_rows, col_widths=[5.5*cm, 9.3*cm]))
+
+    if a["local_dns_stats"]:
+        story.append(Spacer(1, 6))
+        n_dns = len(a["dns_events"])
+        dns_clause = (f"wurde <b>1 DNS-Fehler-Ereignis</b> dokumentiert" if n_dns == 1
+                     else f"wurden <b>{n_dns} DNS-Fehler-Ereignisse</b> dokumentiert")
+        for s in a["local_dns_stats"]:
+            story.append(Paragraph(
+                f"Zahlen zum lokalen Resolver „{s['name']}“: im Messzeitraum in "
+                f"<b>{s['failures']} von {s['total']}</b> Messungen "
+                f"(<b>{s['percent']:.2f}%</b>) nicht erreichbar. Im selben Zeitraum {dns_clause} "
+                f"— ein solches Ereignis setzt zwingend voraus, dass auch die über externe "
+                f"Nameserver aufgelösten Domains gleichzeitig ausfallen; ein isolierter "
+                f"Ausfall des lokalen Resolvers allein löst also keinen DNS- oder "
+                f"Anbieter-Ausfall aus.",
+                styles["NWSmall"]))
+
+    story.append(Spacer(1, 6))
     story.append(Paragraph(
         "Rechtlicher Hinweis: Dieser Bericht ist eine technische Dokumentation und für sich "
         "genommen keine rechtsverbindliche amtliche Messung. Für die Durchsetzung von "

@@ -9,7 +9,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 try:
     import yaml
@@ -52,6 +52,15 @@ class TargetConfig:
     name: str
     host: str
     type: str  # gateway | icmp | dns
+    # Explicit DNS server to query for "dns" targets (e.g. "1.1.1.1"). If
+    # unset, dnspython falls back to the system resolver — which, on a host
+    # running a local resolver like AdGuard/Pi-hole (common on the same Pi
+    # NetWatch runs on), means the "public domain" DNS checks would silently
+    # go through that local resolver instead of testing DNS independently.
+    # Set this for every public-domain target so DNS_FAILURE evidence can't
+    # be attributed to your own DNS setup. Leave unset only for a target
+    # that's deliberately testing the local resolver itself.
+    nameserver: Optional[str] = None
 
 
 @dataclass
@@ -264,15 +273,18 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     # --- targets ---
     t = raw.get("targets", {})
     targets_local = [
-        TargetConfig(name=x["name"], host=x["host"], type=x["type"])
+        TargetConfig(name=x["name"], host=x["host"], type=x["type"],
+                     nameserver=x.get("nameserver"))
         for x in t.get("local", [])
     ]
     targets_public_ip = [
-        TargetConfig(name=x["name"], host=x["host"], type=x["type"])
+        TargetConfig(name=x["name"], host=x["host"], type=x["type"],
+                     nameserver=x.get("nameserver"))
         for x in t.get("public_ip", [])
     ]
     targets_public_domains = [
-        TargetConfig(name=x["name"], host=x["host"], type=x["type"])
+        TargetConfig(name=x["name"], host=x["host"], type=x["type"],
+                     nameserver=x.get("nameserver"))
         for x in t.get("public_domains", [])
     ]
 

@@ -14,9 +14,20 @@ targets:
     - name: "Gateway"
       host: "auto"              # auto = detect from routing table
       type: "gateway"
-    - name: "Local DNS"
-      host: "127.0.0.1"
+    # Tests ONLY the local resolver (AdGuard/Pi-hole/etc.) — `nameserver` is
+    # WHO gets asked (point this at its LAN IP if it doesn't run on the same
+    # host as NetWatch), `host` is a real, always-resolvable domain used as
+    # the query (an IP literal here would always fail with NXDOMAIN — a
+    # resolver can't return an A record for the "domain name" 127.0.0.1).
+    # This is a self-diagnostic, kept deliberately separate from the
+    # public_domains checks below: if this target fails while those keep
+    # working (they don't depend on it), that proves the local resolver —
+    # not the ISP — is the cause, and the classifier will not raise
+    # DNS_FAILURE from this alone.
+    - name: "Lokaler Resolver (AdGuard)"
+      host: "cloudflare.com"
       type: "dns"
+      nameserver: "127.0.0.1"
   public_ip:
     - name: "Cloudflare DNS"
       host: "1.1.1.1"
@@ -27,19 +38,31 @@ targets:
     - name: "Quad9 DNS"
       host: "9.9.9.9"
       type: "icmp"
+  # Each target below sets an explicit `nameserver` — the hostname is
+  # resolved by querying that IP directly, bypassing whatever resolver is
+  # configured on this system (AdGuard, Pi-hole, the ISP's own resolver via
+  # DHCP, etc). This is what makes DNS_FAILURE evidence hold up against a
+  # provider claiming "that's your own DNS setup, not us": these checks
+  # never touch your local resolver at all. Nameservers are deliberately
+  # spread across three unrelated operators so a single resolver's own
+  # outage can't be mistaken for an ISP failure either.
   public_domains:
     - name: "Google"
       host: "google.com"
       type: "dns"
+      nameserver: "1.1.1.1"     # Cloudflare
     - name: "Cloudflare"
       host: "cloudflare.com"
       type: "dns"
+      nameserver: "8.8.8.8"     # Google
     - name: "GitHub"
       host: "github.com"
       type: "dns"
+      nameserver: "9.9.9.9"     # Quad9
     - name: "Wikipedia"
       host: "wikipedia.org"
       type: "dns"
+      nameserver: "1.1.1.1"     # Cloudflare
 
 thresholds:
   latency_warning_ms: 100

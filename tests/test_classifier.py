@@ -77,6 +77,28 @@ def _dns_failure() -> list[MeasurementResult]:
     ]
 
 
+def _local_resolver_only_failure() -> list[MeasurementResult]:
+    """
+    A local DNS resolver (AdGuard/Pi-hole style, run on the same host) fails
+    in isolation. The externally-resolved DNS checks (which query a fixed
+    external nameserver directly, bypassing the local resolver — see
+    config.example.yaml's `nameserver` field) and all ICMP checks stay
+    healthy, exactly as they would in reality if only the local resolver is
+    down. This must not be classified as DNS_FAILURE, ISP_FAILURE, or
+    LOCAL_NETWORK_FAILURE — it's purely local infrastructure and must not
+    show up as provider-attributable evidence.
+    """
+    return [
+        _make_result("Gateway", "192.168.1.1", "gateway", True),
+        _make_result("Cloudflare DNS", "1.1.1.1", "icmp", True),
+        _make_result("Google DNS", "8.8.8.8", "icmp", True),
+        _make_result("Quad9 DNS", "9.9.9.9", "icmp", True),
+        _make_result("Google", "google.com", "dns", True),
+        _make_result("GitHub", "github.com", "dns", True),
+        _make_result("Lokaler Resolver (AdGuard)", "127.0.0.1", "dns", False),
+    ]
+
+
 def _high_latency() -> list[MeasurementResult]:
     return [
         _make_result("Gateway", "192.168.1.1", "gateway", True, 5.0),
@@ -158,6 +180,12 @@ class TestClassifier:
         events = self._feed(clf, _dns_failure, 3)
         types = [e.event_type for e in events]
         assert EventType.DNS_FAILURE in types
+
+    def test_local_resolver_failure_alone_is_not_provider_evidence(self):
+        clf = self._clf()
+        events = self._feed(clf, _local_resolver_only_failure, 5)
+        assert not events
+        assert clf.current_status() == "OK"
 
     def test_latency_degradation_detected(self):
         clf = self._clf()

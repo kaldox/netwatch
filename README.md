@@ -158,6 +158,8 @@ NetWatch beobachtet alle Ziele und klassifiziert, wenn etwas ausfällt, das Must
 
 Jedes Ereignis erfasst die öffentliche IP vorher/während/nachher, fährt ein Traceroute + MTR und macht einen Snapshot der Pi-Ressourcen — damit du einen echten Ausfall von einem Mess-Artefakt unterscheiden kannst.
 
+**Läuft AdGuard, Pi-hole oder sonst etwas Netzwerkrelevantes auf demselben Pi?** `ISP_FAILURE` beruht ausschließlich auf ICMP-Pings an feste IPs (1.1.1.1/8.8.8.8/9.9.9.9), ganz ohne Namensauflösung — ein lokaler Resolver kann das weder auslösen noch verfälschen. Die DNS-Checks auf öffentliche Domains fragen per `nameserver`-Feld in der Config feste externe Server direkt ab statt den System-Resolver (siehe `config.example.yaml`); dein lokaler Resolver läuft dort als eigenes, separat ausgewertetes Diagnose-Ziel, das nie in die Anbieter-Bewertung einfließt. Systemlast (CPU/RAM/Zykluszeit) wird bei jeder Messung mit erfasst und ist damit ebenfalls unabhängig davon, ob sie von NetWatch selbst, AdGuard oder einem anderen Container auf dem Pi verursacht wird.
+
 ---
 
 ## Architektur

@@ -141,14 +141,14 @@ class NetWatch:
     # Measurement loop
     # ------------------------------------------------------------------
 
-    def _build_target_list(self) -> list[tuple[str, str, str]]:
-        result: list[tuple[str, str, str]] = []
+    def _build_target_list(self) -> list[tuple[str, str, str, Optional[str]]]:
+        result: list[tuple[str, str, str, Optional[str]]] = []
         gw = self.monitor.gateway
         for t in self.cfg.all_targets:
             host = gw if t.host == "auto" and gw else t.host
             if not host:
                 continue
-            result.append((t.name, host, t.type))
+            result.append((t.name, host, t.type, t.nameserver))
         return result
 
     def _run_measurement_cycle(self) -> None:
@@ -184,6 +184,7 @@ class NetWatch:
             load_avg_15m=resources.load_avg_15m,
             cpu_temp_celsius=resources.cpu_temp_celsius,
             measurement_cycle_seconds=cycle_seconds,
+            network_interface=self.monitor.interface,
         )
 
         # Persist measurements
@@ -262,6 +263,7 @@ class NetWatch:
                     cpu_temp_celsius=resources.cpu_temp_celsius,
                     measurement_cycle_seconds=cycle_seconds,
                     event_id=ev.event_id,
+                    network_interface=self.monitor.interface,
                 )
 
                 # Capture FritzBox line state at the moment the event fired.
@@ -313,7 +315,7 @@ class NetWatch:
                 self.notifier.notify_event_opened(ev)
                 # Launch diagnostics in background thread
                 if self.cfg.monitoring.traceroute_on_failure:
-                    diag_targets = [h for _, h, t in targets if t == "icmp"]
+                    diag_targets = [h for _, h, t, _ns in targets if t == "icmp"]
                     if diag_targets:
                         threading.Thread(
                             target=self._run_diagnostics_bg,
@@ -331,7 +333,7 @@ class NetWatch:
             if ev.event_type in (EventType.ISP_FAILURE, EventType.ROUTING_FAILURE):
                 last_tr = self._last_traceroute_time.get(ev.event_id, 0)
                 if time.monotonic() - last_tr > self.cfg.monitoring.traceroute_repeat_interval:
-                    diag_targets = [h for _, h, t in targets if t == "icmp"]
+                    diag_targets = [h for _, h, t, _ns in targets if t == "icmp"]
                     if diag_targets:
                         self._last_traceroute_time[ev.event_id] = time.monotonic()
                         threading.Thread(

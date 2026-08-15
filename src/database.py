@@ -18,7 +18,7 @@ from typing import Any, Generator, Optional
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 9
+_SCHEMA_VERSION = 10
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +186,8 @@ class Database:
                 self._migrate_v8(conn)
             if version < 9:
                 self._migrate_v9(conn)
+            if version < 10:
+                self._migrate_v10(conn)
 
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
 
@@ -552,6 +554,20 @@ class Database:
         """)
         logger.info("Database migration v9 applied")
 
+    def _migrate_v10(self, conn: sqlite3.Connection) -> None:
+        """
+        Add network_interface to system_resources, sampled every cycle
+        (not just at event time like events.network_interface already is).
+        This turns "the measuring device was wired, not on WiFi" from an
+        asserted precondition in the provider report into something that
+        can be read back from continuous data for the whole period.
+        """
+        try:
+            conn.execute("ALTER TABLE system_resources ADD COLUMN network_interface TEXT")
+        except sqlite3.OperationalError:
+            pass
+        logger.info("Database migration v10 applied")
+
     # ------------------------------------------------------------------
     # Measurements
     # ------------------------------------------------------------------
@@ -618,6 +634,32 @@ class Database:
                     (start, end),
                 ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_target_reachability(
+        self,
+        target_name: str,
+        start: str,
+        end: str,
+    ) -> tuple[int, int]:
+        """
+        Return (failure_count, total_count) for one target's reachability in
+        [start, end], via a single aggregate query rather than fetching every
+        row. Used to quantify self-diagnostic targets (e.g. a local DNS
+        resolver) against the measurement window without pulling the full
+        per-5s row set into memory.
+        """
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*), SUM(CASE WHEN reachable = 0 THEN 1 ELSE 0 END)
+                FROM measurements
+                WHERE target_name = ? AND timestamp BETWEEN ? AND ?
+                """,
+                (target_name, start, end),
+            ).fetchone()
+        total = row[0] or 0
+        failures = row[1] or 0
+        return failures, total
 
     # ------------------------------------------------------------------
     # Events
@@ -718,6 +760,7 @@ class Database:
         cpu_temp_celsius: Optional[float] = None,
         measurement_cycle_seconds: Optional[float] = None,
         event_id: Optional[str] = None,
+        network_interface: Optional[str] = None,
     ) -> None:
         with self._lock, self._conn() as conn:
             conn.execute(
@@ -725,15 +768,30 @@ class Database:
                 INSERT INTO system_resources
                     (timestamp, cpu_percent, ram_percent, ram_used_mb,
                      load_avg_1m, load_avg_5m, load_avg_15m,
-                     cpu_temp_celsius, measurement_cycle_seconds, event_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
+                     cpu_temp_celsius, measurement_cycle_seconds, event_id,
+                     network_interface)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     timestamp, cpu_percent, ram_percent, ram_used_mb,
                     load_avg_1m, load_avg_5m, load_avg_15m,
                     cpu_temp_celsius, measurement_cycle_seconds, event_id,
+                    network_interface,
                 ),
             )
+
+    def get_network_interfaces_seen(self, start: str, end: str) -> list[str]:
+        """Distinct non-null network_interface values sampled in [start, end]."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT network_interface FROM system_resources
+                WHERE timestamp BETWEEN ? AND ?
+                  AND network_interface IS NOT NULL AND network_interface != ''
+                """,
+                (start, end),
+            ).fetchall()
+        return [r[0] for r in rows]
 
     def get_system_resources(
         self,
