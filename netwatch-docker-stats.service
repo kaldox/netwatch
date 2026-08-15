@@ -1,0 +1,11 @@
+[Unit]
+Description=NetWatch: snapshot per-container docker stats for evidence capture
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/netwatch-docker-stats.sh
+# Reads/writes only NetWatch's own data dir and calls `docker stats`
+# (read-only Docker API call) — no elevated capabilities needed beyond
+# membership in the `docker` group.

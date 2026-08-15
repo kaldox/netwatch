@@ -25,6 +25,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 from src.classifier import Classifier, EventType
 from src.config import AppConfig, TargetConfig, load_config
 from src.database import Database, DailyStatRow, EventRow, MeasurementRow, PublicIpRow, SpeedTestRow, TracerouteRow
+from src.docker_stats import read_docker_stats_snapshot
 from src.fritzbox import read_fritzbox_status, read_fritzbox_log
 from src.monitor import NetworkMonitor, get_public_ip
 from src.notifier import Notifier
@@ -309,6 +310,19 @@ class NetWatch:
                             )
                     except Exception as exc:
                         logger.debug("FritzBox read at event failed: %s", exc)
+
+                # Per-container resource snapshot at the moment the event
+                # fired, if a host-side snapshotter is set up (see
+                # scripts/docker-stats-snapshot.sh). Rules out "some other
+                # container was hogging the Pi" at the same granularity the
+                # host-wide CPU/RAM snapshot already rules out the Pi as a
+                # whole. Best-effort: silently absent on non-Docker setups.
+                snapshot = read_docker_stats_snapshot(_PROJECT_ROOT / "data")
+                if snapshot:
+                    write_evidence_file(
+                        _PROJECT_ROOT / "data", ev.event_id, snapshot,
+                        suffix="docker_stats.txt",
+                    )
 
             # Notifications
             if ev.is_open:

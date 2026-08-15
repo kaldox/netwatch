@@ -59,3 +59,27 @@ sudo systemctl enable --now netwatch
 Die Retention ist jetzt **im Code** (Standard: 30 Tage Rohdaten, siehe
 `database.measurement_retention_days` in der config). Der separate
 `netwatch-prune`-systemd-Timer wird dann **nicht** mehr gebraucht.
+
+## Optional: Per-Container Docker-Stats als Zusatzbeweis
+
+NetWatch selbst rührt den Docker-Socket nie an — ihn (auch `:ro`) in den
+Container zu mounten wäre praktisch Root auf dem ganzen Host, das Mount-Flag
+schützt nur die Socket-*Datei*, nicht die Docker-API dahinter. Stattdessen
+schreibt ein kleines Skript **auf dem Host** (außerhalb jedes Containers)
+periodisch `docker stats` in eine Datei, die NetWatch über sein ohnehin
+gemountetes `data/`-Verzeichnis nur liest. Damit lässt sich zu jedem Ereignis
+zusätzlich zur host-weiten CPU/RAM-Erfassung auch belegen, dass kein anderer
+Container (AdGuard, n8n, was auch immer) gerade die Last verursacht hat.
+
+```bash
+sudo cp netwatch-docker-stats.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/netwatch-docker-stats.sh
+sudo cp netwatch-docker-stats.service netwatch-docker-stats.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now netwatch-docker-stats.timer
+```
+
+Läuft alle 10s, schreibt nach `data/docker_stats_snapshot.txt`. NetWatch
+hängt den Inhalt bei jedem neu eröffneten Ereignis als Beweisdatei an
+(`data/evidence/<event_id>/*.docker_stats.txt`), sofern die Datei nicht
+älter als 60s ist. Kein Effekt, wenn der Timer nicht läuft — rein additiv.

@@ -1,6 +1,6 @@
 # NetWatch
 
-[🇩🇪 Deutsch](README.md) · **🇬🇧 English** · [🐻 Baseldütsch](README.bl.md)
+[🇩🇪 Deutsch](README.md) · **🇬🇧 English**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 
@@ -170,6 +170,8 @@ NetWatch watches all targets and, when things fail, classifies the pattern:
 - **Latency / packet loss over threshold** → `LATENCY_DEGRADATION` / `PACKET_LOSS`
 
 Each event records the public IP before/during/after, runs a traceroute + MTR, and snapshots the Pi's resource state — so you can tell a real outage from a measurement artefact.
+
+**Running AdGuard, Pi-hole, or anything else network-relevant on the same Pi?** `ISP_FAILURE` relies solely on ICMP pings to fixed IPs (1.1.1.1/8.8.8.8/9.9.9.9), with no name resolution at all — a local resolver can neither trigger nor distort it. The DNS checks against public domains use the `nameserver` field in the config to query fixed external servers directly instead of the system resolver (see `config.example.yaml`); your local resolver runs there as its own, separately evaluated diagnostic target that never feeds into the provider assessment. System load (CPU/RAM/cycle time) is captured on every measurement too, so it's likewise independent of whether it was caused by NetWatch itself, AdGuard, or another container on the Pi.
 
 ---
 
