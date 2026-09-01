@@ -9,15 +9,16 @@ conclusion is defensible and can't be turned back on the customer:
     2. DSL line       — the physical line capacity the provider delivers.
     3. Provider net   — measured throughput / availability vs. the line.
 
-On top of that it evaluates the measured speeds against the contractual
-minimum / normal / maximum values using the criteria recognised by the
-German regulator (Bundesnetzagentur, Vfg 99/2021) as an orientation, and
-documents availability / outages with timestamps.
+On top of that it compares the measured speeds against the three
+contractual values (maximum / normally available / minimum) from the
+product information sheet, using commonly-used reference thresholds
+(no statute is invoked), and documents availability / outages with
+timestamps.
 
-NOTE: NetWatch is a *continuous documentation* tool. It is deliberately
-honest about its own limits and is NOT the official regulator measurement.
-For a formal claim it should be paired with the official procedure
-(DE: breitbandmessung.de Desktop-App · CH: networktest.ch + ombudscom).
+NOTE: NetWatch is a *continuous documentation* tool, not a one-off
+calibrated measurement. To take a case further it can be paired with an
+official measurement tool (e.g. networktest.ch) and, in a dispute, the
+telecoms ombudsman.
 """
 
 from __future__ import annotations
@@ -33,7 +34,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    PageBreak,
+    CondPageBreak,
+    HRFlowable,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -69,14 +71,32 @@ def _styles():
         "NWFazit", parent=styles["Heading1"], fontSize=15, textColor=BRAND,
         spaceBefore=2, spaceAfter=8))
     styles.add(ParagraphStyle(
-        "NWH2", parent=styles["Heading2"], fontSize=13, textColor=BRAND,
-        spaceBefore=14, spaceAfter=6))
+        "NWH2", parent=styles["Heading2"], fontSize=12.5, textColor=BRAND,
+        spaceBefore=18, spaceAfter=2))
+    styles.add(ParagraphStyle(
+        "NWH3", parent=styles["Normal"], fontSize=9.5, textColor=BRAND,
+        fontName="Helvetica-Bold", spaceBefore=8, spaceAfter=3))
     styles.add(ParagraphStyle(
         "NWBody", parent=styles["Normal"], fontSize=9.5, leading=14, spaceAfter=6))
     styles.add(ParagraphStyle(
-        "NWSmall", parent=styles["Normal"], fontSize=8, textColor=GREY, leading=11,
-        spaceAfter=4))
+        "NWSmall", parent=styles["Normal"], fontSize=8.5, textColor=GREY, leading=12,
+        spaceAfter=5))
+    styles.add(ParagraphStyle(
+        "NWBullet", parent=styles["Normal"], fontSize=8.5, textColor=GREY, leading=12,
+        spaceAfter=3, leftIndent=10, firstLineIndent=-10))
     return styles
+
+
+def _h2(text: str, styles) -> list:
+    """A numbered section heading with an underline rule. Returned as a list
+    (prefixed with a soft page break) so headings never get orphaned at the
+    bottom of a page."""
+    return [
+        CondPageBreak(3.4 * cm),
+        Paragraph(text, styles["NWH2"]),
+        HRFlowable(width="100%", thickness=0.6, color=BRAND,
+                   spaceBefore=2, spaceAfter=8),
+    ]
 
 
 def _fmt_num(v: Optional[float], suffix: str = "") -> str:
@@ -233,8 +253,10 @@ def _analyse(db: Database, cfg: AppConfig, days: int) -> dict[str, Any]:
 
 def _evaluate_contract(a: dict[str, Any], contract_max: float,
                        contract_normal: float, contract_min: float) -> dict[str, Any]:
-    """Evaluate measured downloads against the three contractual values using
-    the Bundesnetzagentur (Vfg 99/2021) criteria as orientation."""
+    """Evaluate measured downloads against the three contractual values
+    (maximum / normally available / minimum) using commonly-used reference
+    thresholds (90% / 90% of measurements / minimum). No statute is invoked;
+    these are orientation values only."""
     downs = a["downs"]
     by_day = a["by_day"]
     n = len(downs)
@@ -323,8 +345,8 @@ def _summarise(db: Database, cfg: AppConfig, a: dict[str, Any],
         severity = "red"
         violated = [name for name, _req, _res, ok in contract_eval["criteria"] if not ok]
         findings.append(
-            "Anerkannte Geschwindigkeits-Kriterien (Bundesnetzagentur Vfg 99/2021) "
-            "verletzt: " + ", ".join(violated) + " (Details in Kapitel 1)."
+            "Geschwindigkeits-Richtwerte nicht erreicht: " + ", ".join(violated)
+            + " (Details in Kapitel 1)."
         )
     if dsl_cant_meet:
         severity = "red"
@@ -447,7 +469,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
                     if summary["throttle_pct"] is not None else "–")
     down_txt = _fmt_num(a["down_avg"], " Mbit/s")
     if c_max and a["down_avg"] is not None:
-        down_txt += f"  ({a['down_avg'] / c_max * 100:.0f}% des Vertrags-Max {c_max:.0f})"
+        down_txt += f"  ({a['down_avg'] / c_max * 100:.0f}% des Vertrags-Maximums)"
     kb_rows = [
         ["Kennwert", "Ergebnis"],
         ["Messzeitraum", f"{period_from} – {period_to} ({days} Tage)"],
@@ -464,63 +486,36 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
          f"{len(a['disconnects'])} / {len(a['sync_changes'])}"],
     ]
     if contract_eval.get("has_data") and contract_eval.get("criteria"):
-        kb_rows.append(["Vertragsbewertung (Vfg 99/2021)",
-                        "Abweichung belegt" if summary["contract_deviation"]
-                        else "Kriterien im Messzeitraum eingehalten"])
+        kb_rows.append(["Vertragswerte (Download)",
+                        "Richtwert nicht erreicht" if summary["contract_deviation"]
+                        else "Richtwerte im Messzeitraum eingehalten"])
     else:
-        kb_rows.append(["Vertragsbewertung (Vfg 99/2021)",
-                        "keine Vertragswerte hinterlegt — Bewertung übersprungen"])
+        kb_rows.append(["Vertragswerte (Download)",
+                        "keine Werte hinterlegt — Vergleich übersprungen"])
     story.append(_table(kb_rows, col_widths=[5.6 * cm, 9.2 * cm]))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
     story.append(Paragraph(
-        "Die vollständige Herleitung mit allen Belegen folgt ab „Datengrundlage &amp; "
-        "Methodik“. Alle Rohdaten liegen als CSV-Dateien bei.", styles["NWSmall"]))
-    story.append(Spacer(1, 12))
+        "<b>Aufbau:</b> 1 Geschwindigkeit &amp; Vertragswerte · 2 Verfügbarkeit &amp; "
+        "Ausfälle · 3 Zwangstrennungen · 4 Hausverkabelung · 5 DSL-Leitung · "
+        "6 Anbieternetz · 7 Leitungsstabilität · 8 Methodik &amp; Absicherung. "
+        "Alle Rohdaten liegen als CSV-Dateien bei.", styles["NWSmall"]))
 
-    # ---- 0. Data basis & methodology ----
-    story.append(Paragraph("Datengrundlage &amp; Methodik", styles["NWH2"]))
-    story.append(Paragraph(
-        f"NetWatch misst kontinuierlich und automatisiert: Erreichbarkeit, Latenz, "
-        f"Jitter und Paketverlust alle 5 Sekunden, den realen Durchsatz (Down-/Upload "
-        f"gegen Cloudflare) alle 15 Minuten. Im Zeitraum liegen "
-        f"<b>{a['speedtest_count']} erfolgreiche Durchsatzmessungen</b> an "
-        f"<b>{len(a['measurement_days'])} Messtagen</b> vor. Alle Messungen erfolgen "
-        f"kabelgebunden direkt am Router; die Systemlast des Messgeräts wird je Messung "
-        f"miterfasst, um eine Verfälschung durch Überlastung auszuschließen.",
-        styles["NWBody"]))
-    story.append(Paragraph(
-        "Wichtig zur Einordnung: NetWatch ist eine <b>durchgehende Langzeit-Dokumentation</b> "
-        "und ersetzt nicht das amtliche Messverfahren. Für einen rechtsverbindlichen Nachweis "
-        "sollte dieser Bericht mit dem offiziellen Verfahren kombiniert werden "
-        "(Deutschland: Breitbandmessung-Desktop-App der Bundesnetzagentur; "
-        "Schweiz: networktest.ch, Schlichtung über ombudscom). Die folgende Bewertung "
-        "orientiert sich an den Kriterien der Bundesnetzagentur (Vfg 99/2021).",
-        styles["NWSmall"]))
-    story.append(Paragraph(
-        "Abgrenzung der Ursachen: Anbieter-Ausfälle werden über direkte ICMP-Pings an feste "
-        "öffentliche IP-Adressen (1.1.1.1, 8.8.8.8, 9.9.9.9) erkannt — ohne Namensauflösung. "
-        "Ein lokaler oder selbst betriebener DNS-Server (z. B. AdGuard, Pi-hole) kann sie daher "
-        "weder auslösen noch verfälschen. Die ergänzenden DNS-Checks auf öffentliche Domains "
-        "fragen ebenfalls feste, unabhängige Nameserver (1.1.1.1, 8.8.8.8, 9.9.9.9) direkt per "
-        "IP ab — nicht den auf dem Messgerät konfigurierten Resolver. Der lokale Resolver selbst "
-        "wird als eigener, gesondert ausgewiesener Diagnose-Ziel geführt, der nicht in die "
-        "Anbieter-Bewertung einfließt (Details: Kapitel 8). Jeder Ausfall wird zusätzlich mit "
-        "dem WAN-Status der FritzBox im selben Moment abgeglichen. Reine Durchsatz- und "
-        "Latenzwerte können durch gleichzeitige Eigennutzung im Haushalt beeinflusst sein und "
-        "gelten hier nur als ergänzender, nicht als tragender Beleg.",
-        styles["NWSmall"]))
-
-    # ---- 1. Contract evaluation (core) ----
-    story.append(Paragraph("1. Vertragswerte &amp; Bewertung (Download)", styles["NWH2"]))
+    # ===================================================================
+    # 1. Speed vs. contract values
+    # ===================================================================
+    story += _h2("1. Geschwindigkeit &amp; Vertragswerte (Download)", styles)
     if not c_max and not c_norm and not c_min:
         story.append(Paragraph(
-            "Es sind keine Vertragswerte hinterlegt. Tragen Sie in der Konfiguration "
-            "die Werte aus Ihrem Produktinformationsblatt ein (Maximum, "
-            "„normalerweise zur Verfügung stehend“, Minimum), damit dieser Abschnitt "
-            "eine belastbare Bewertung liefert.",
+            "Es sind keine Vertragswerte hinterlegt. In der Konfiguration lassen sich die "
+            "Werte aus dem Produktinformationsblatt eintragen (Maximum, „normalerweise zur "
+            "Verfügung stehend“, Minimum), damit dieser Abschnitt einen belastbaren "
+            "Vergleich liefert.",
             styles["NWBody"]))
     else:
-        ct_rows = [["Vertragswert", "Vereinbart", "Gemessen (Schnitt / min)", "Verhältnis"]]
+        story.append(Paragraph(
+            "Gemessene Download-Werte gegenübergestellt den drei Vertragswerten aus dem "
+            "Produktinformationsblatt:", styles["NWBody"]))
+        ct_rows = [["Vertragswert", "Vereinbart", "Gemessen (Ø / min)", "Verhältnis"]]
         def ratio(meas, ref):
             return f"{meas/ref*100:.0f}%" if (meas is not None and ref) else "–"
         if c_max:
@@ -536,39 +531,43 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
                             f"{_fmt_num(a['down_avg'])} / {_fmt_num(a['down_min'])}",
                             ratio(a["down_min"], c_min)])
         story.append(_table(ct_rows, col_widths=[4.2*cm, 3.2*cm, 4.6*cm, 2.8*cm]))
-        story.append(Spacer(1, 6))
+        story.append(Spacer(1, 8))
 
         ev = contract_eval
         if ev["has_data"] and ev["criteria"]:
-            crit_rows = [["Kriterium (angelehnt an Vfg 99/2021)", "Anforderung", "Ergebnis", "Status"]]
+            story.append(Paragraph(
+                "Bewertung anhand gebräuchlicher Richtwerte (es wird kein Gesetz "
+                "herangezogen — reine Orientierung):", styles["NWBody"]))
+            crit_rows = [["Richtwert", "Erwartung", "Ergebnis", "Status"]]
             for name, req, result, ok in ev["criteria"]:
-                crit_rows.append([name, req, result, "erfüllt" if ok else "VERLETZT"])
+                crit_rows.append([name, req, result,
+                                  "erfüllt" if ok else "nicht erfüllt"])
             story.append(_table(crit_rows, col_widths=[4.4*cm, 4.8*cm, 3.6*cm, 2.0*cm]))
             story.append(Spacer(1, 8))
             if ev["deviation"]:
                 story.append(_verdict_box(
-                    "<b>Befund:</b> Mindestens ein anerkanntes Kriterium ist verletzt — die "
-                    "gemessene Leistung weicht erheblich von der vertraglich zugesicherten ab. "
-                    "Dies begründet dem Grunde nach ein Minderungs- bzw. Sonderkündigungsrecht "
-                    "(formaler Nachweis über das amtliche Verfahren empfohlen).", RED))
+                    "<b>Befund:</b> Mindestens ein Richtwert wird nicht erreicht — die "
+                    "gemessene Leistung weicht deutlich von den Vertragswerten ab. Das ist "
+                    "der Ansatzpunkt für eine Reklamation bei der Anbieterin.", RED))
             else:
                 story.append(_verdict_box(
-                    "<b>Befund:</b> Die anerkannten Kriterien werden im Messzeitraum eingehalten. "
-                    "Eine erhebliche Geschwindigkeitsabweichung ist nicht belegt.", GREEN))
-        # CH 80% rule
+                    "<b>Befund:</b> Die Richtwerte werden im Messzeitraum eingehalten. "
+                    "Eine deutliche Geschwindigkeitsabweichung ist nicht belegt.", GREEN))
         if c_max and a["downs"]:
             ref = c_norm or c_max
             below = sum(1 for v in a["downs"] if v < 0.8 * ref) / len(a["downs"]) * 100
             story.append(Spacer(1, 6))
             story.append(Paragraph(
-                f"Zur Schweizer Praxis (Konsumentenschutz/ombudscom): in "
-                f"<b>{below:.0f}%</b> der Messungen lag der Download unter 80% von "
-                f"{ref:.1f} Mbit/s. Liegt die Leistung überwiegend unter 80% des Zugesicherten, "
-                f"bestehen Ansprüche gegenüber der Anbieterin.",
+                f"Ergänzender Richtwert (80 %): in <b>{below:.0f}%</b> der Messungen lag "
+                f"der Download unter 80 % von {ref:.1f} Mbit/s. Ein dauerhaftes "
+                f"Unterschreiten der 80-%-Marke gilt breit als Anhaltspunkt für eine "
+                f"unzureichende Leistung.",
                 styles["NWSmall"]))
 
-    # ---- 2. Availability / outages ----
-    story.append(Paragraph("2. Verfügbarkeit &amp; Ausfälle", styles["NWH2"]))
+    # ===================================================================
+    # 2. Availability / outages
+    # ===================================================================
+    story += _h2("2. Verfügbarkeit &amp; Ausfälle", styles)
     av_rows = [["Kennwert", "Wert"]]
     if a["avg_avail"] is not None:
         av_rows.append(["Verfügbarkeit (Schnitt)", f"{a['avg_avail']:.3f}%"])
@@ -606,23 +605,23 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             f"im selben Moment getrennt bzw. gerade neu verbunden (WAN-Uptime zurückgesetzt) — "
             f"hier ist der Leitungsabriss durch das Anbieter-Gerät selbst belegt. Bei den übrigen "
             f"blieb die FritzBox verbunden, während die externen Ziele unerreichbar waren: eine "
-            f"Störung im Providernetz oberhalb Ihres Anschlusses.",
+            f"Störung im Providernetz oberhalb des Anschlusses.",
             styles["NWSmall"]))
     story.append(Paragraph(
-        "Hinweis: NetWatch zeichnet auch während eines Ausfalls lokal weiter auf — der "
-        "Zeitpunkt, die Dauer und die öffentliche IP vor/während/nach jedem Ausfall sind "
-        "damit unabhängig belegt, selbst wenn das Internet zeitweise nicht erreichbar war.",
+        "Hinweis: NetWatch zeichnet auch während eines Ausfalls lokal weiter auf — "
+        "Zeitpunkt, Dauer und die öffentliche IP vor/während/nach jedem Ausfall sind damit "
+        "unabhängig belegt, selbst wenn das Internet zeitweise nicht erreichbar war.",
         styles["NWSmall"]))
 
-    story.append(PageBreak())
-
-    # ---- 3. Router disconnect log — central independent evidence ----
-    story.append(Paragraph("3. Anbieter-Zwangstrennungen laut Router-Protokoll", styles["NWH2"]))
+    # ===================================================================
+    # 3. Router disconnect log — independent evidence from the router
+    # ===================================================================
+    story += _h2("3. Zwangstrennungen laut Router-Protokoll", styles)
     reconnects = db.get_fritzbox_log(category="reconnect", limit=1000)
     n_disc = len(a["disconnects"]); n_recon = len(reconnects)
     if a["disconnects"] or reconnects:
         story.append(Paragraph(
-            f"Die stärkste, vom Messgerät unabhängige Beweisquelle ist das Ereignisprotokoll der "
+            f"Die vom Messgerät unabhängige Beweisquelle ist das Ereignisprotokoll der "
             f"FritzBox selbst: Der Router dokumentiert jede Zwangstrennung mit Zeitstempel — "
             f"unabhängig davon, welches Gerät im Heimnetz misst, welcher DNS genutzt wird oder ob "
             f"gerade gesurft wird. Im Zeitraum protokolliert die FritzBox <b>{n_recon} "
@@ -647,8 +646,10 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             "Im Messzeitraum wurden keine Zwangstrennungen im FritzBox-Protokoll erfasst.",
             styles["NWBody"]))
 
-    # ---- 4. Layer 1: house wiring ----
-    story.append(Paragraph("4. Hausverkabelung (eigene Seite)", styles["NWH2"]))
+    # ===================================================================
+    # 4. Layer 1: house wiring (own side)
+    # ===================================================================
+    story += _h2("4. Hausverkabelung (eigene Seite)", styles)
     if a["cabling"]:
         latest = a["cabling"][0]
         cost = latest.get("cabling_cost_kbps")
@@ -675,8 +676,10 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             "Verkabelung wird vom Router nicht beanstandet.",
             styles["NWBody"]))
 
-    # ---- 4. Layer 2: DSL line ----
-    story.append(Paragraph("5. DSL-Leitung (Anbieter-Leitung)", styles["NWH2"]))
+    # ===================================================================
+    # 5. Layer 2: DSL line (provider's line)
+    # ===================================================================
+    story += _h2("5. DSL-Leitung (Anbieter-Leitung)", styles)
     line_rows = [["Kennwert", "Wert", "Bewertung"]]
     if c_max:
         line_rows.append(["Vertrag Maximum (Down)", f"{c_max:.1f} Mbit/s", "Sollwert"])
@@ -707,8 +710,10 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             f"konfigurierte Leitung, die höher synchronisieren könnte.",
             styles["NWBody"]))
 
-    # ---- 5. Layer 3: provider network ----
-    story.append(Paragraph("6. Anbieternetz (Durchsatz &amp; Abbrüche)", styles["NWH2"]))
+    # ===================================================================
+    # 6. Layer 3: provider network
+    # ===================================================================
+    story += _h2("6. Anbieternetz (Durchsatz &amp; Abbrüche)", styles)
     if a["down_avg"] is not None and a["sync_down_avg"]:
         util = a["down_avg"] / a["sync_down_avg"] * 100
         story.append(Paragraph(
@@ -721,8 +726,10 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             f"(PPPoE-/LCP-Fehler) — außerhalb des Einflusses des Heimnetzes.",
             styles["NWBody"]))
 
-    # ---- 6. Line stability / sync changes ----
-    story.append(Paragraph("7. Leitungsstabilität (Sync-Wechsel)", styles["NWH2"]))
+    # ===================================================================
+    # 7. Line stability / sync changes
+    # ===================================================================
+    story += _h2("7. Leitungsstabilität (Sync-Wechsel)", styles)
     syncs = a["sync_changes"]
     if syncs:
         per_day = len(syncs) / max(1, a["days"])
@@ -757,20 +764,44 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             "Messzeitraum stabil synchronisiert (keine Zwangstrennungen/Resyncs).",
             styles["NWBody"]))
 
-    # ---- 7. Integrity + legal note ----
-    story.append(Paragraph("8. Messintegrität &amp; Hinweise", styles["NWH2"]))
-    story.append(Paragraph(
-        "Alle Messungen erfolgten automatisiert auf einem dauerhaft laufenden Raspberry Pi, "
-        "direkt per Netzwerkkabel mit dem Router verbunden. Zu jeder Messung werden CPU-, RAM- "
-        "und Temperaturauslastung des Messgeräts sowie die Messzyklusdauer erfasst, um eine "
-        "Verfälschung durch Überlastung auszuschließen. Die Leitungswerte stammen unmittelbar "
-        "aus dem Router (TR-064). Die Rohdaten liegen als CSV-Dateien bei und sind nachprüfbar.",
-        styles["NWBody"]))
+    # ===================================================================
+    # 8. Methodology & safeguards  (how it was measured, why other causes
+    #    are ruled out) — kept at the end so the findings come first.
+    # ===================================================================
+    story += _h2("8. Methodik &amp; Absicherung", styles)
 
+    story.append(Paragraph("Wie gemessen wird", styles["NWH3"]))
+    _method_points = [
+        "Erreichbarkeit, Latenz, Jitter und Paketverlust alle 5 Sekunden; realer "
+        "Durchsatz (Down-/Upload gegen Cloudflare) alle 15 Minuten.",
+        f"Im Messzeitraum liegen <b>{a['speedtest_count']} erfolgreiche "
+        f"Durchsatzmessungen</b> an <b>{len(a['measurement_days'])} Messtagen</b> vor.",
+        "Alle Messungen kabelgebunden direkt am Router. CPU, RAM, Temperatur und "
+        "Messzyklusdauer des Messgeräts werden je Messung miterfasst, um eine "
+        "Verfälschung durch Überlastung auszuschließen.",
+        "Die Leitungswerte stammen unmittelbar aus dem Router (TR-064). Alle Rohdaten "
+        "liegen als CSV-Dateien bei und sind nachprüfbar.",
+    ]
+    for p in _method_points:
+        story.append(Paragraph("•&nbsp;" + p, styles["NWBullet"]))
+
+    story.append(Paragraph("Abgrenzung der Ursachen", styles["NWH3"]))
     story.append(Paragraph(
-        "Ausschluss eigener Ursachen: Die folgenden, in der Praxis häufig vorgebrachten "
-        "Einwände sind durch die Messmethodik bereits berücksichtigt und ausgeschlossen:",
-        styles["NWBody"]))
+        "Anbieter-Ausfälle werden über direkte ICMP-Pings an feste öffentliche IP-Adressen "
+        "(1.1.1.1, 8.8.8.8, 9.9.9.9) erkannt — ohne Namensauflösung. Ein lokaler oder selbst "
+        "betriebener DNS-Server (z. B. AdGuard, Pi-hole) kann sie daher weder auslösen noch "
+        "verfälschen. Die ergänzenden DNS-Checks fragen ebenfalls feste, unabhängige "
+        "Nameserver direkt per IP ab, nicht den auf dem Messgerät konfigurierten Resolver. "
+        "Jeder Ausfall wird zusätzlich mit dem WAN-Status der FritzBox im selben Moment "
+        "abgeglichen. Reine Durchsatz- und Latenzwerte können durch gleichzeitige "
+        "Eigennutzung im Haushalt beeinflusst sein und gelten hier nur als ergänzender "
+        "Beleg.",
+        styles["NWSmall"]))
+
+    story.append(Paragraph("Ausschluss eigener Ursachen", styles["NWH3"]))
+    story.append(Paragraph(
+        "In der Praxis häufig vorgebrachte Einwände — und warum die Messmethodik sie "
+        "bereits abdeckt:", styles["NWSmall"]))
     excl_rows = [["Möglicher Einwand", "Warum ausgeschlossen"]]
     excl_rows.append([
         "Fehler im Heimnetz (Kabel, Switch, Router-LAN)",
@@ -842,16 +873,29 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
                 f"Anbieter-Ausfall aus.",
                 styles["NWSmall"]))
 
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Hinweis zur Verwendung", styles["NWH3"]))
     story.append(Paragraph(
-        "Rechtlicher Hinweis: Dieser Bericht ist eine technische Dokumentation und für sich "
-        "genommen keine rechtsverbindliche amtliche Messung. Für die Durchsetzung von "
-        "Minderung oder Sonderkündigung ist das Messprotokoll direkt beim Anbieter vorzulegen; "
-        "empfohlen wird die Kombination mit dem amtlichen Verfahren (DE: Bundesnetzagentur "
-        "Breitbandmessung; CH: networktest.ch / Schlichtungsstelle ombudscom).",
+        "Dieser Bericht ist eine automatisch erstellte technische Dokumentation, keine "
+        "einmalige kalibrierte Messung. Für eine Reklamation wird das Protokoll direkt bei "
+        "der Anbieterin vorgelegt; ergänzend lässt sich eine offizielle Messung "
+        "(z. B. networktest.ch) heranziehen, im Streitfall die Schlichtungsstelle (ombudscom). "
+        "Die verwendeten Prozentwerte (90 %, 80 %) sind gebräuchliche Richtwerte zur "
+        "Orientierung, kein Gesetzesbezug.",
         styles["NWSmall"]))
 
-    doc.build(story)
+    def _footer(canvas, doc_):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(GREY)
+        canvas.drawString(
+            2 * cm, 1.1 * cm,
+            "NetWatch – automatisch erstellte technische Dokumentation")
+        canvas.drawRightString(
+            A4[0] - 2 * cm, 1.1 * cm, f"Seite {canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     logger.info("Provider report PDF written: %s", pdf_path)
 
     # ---- CSV exports ----

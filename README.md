@@ -132,7 +132,7 @@ Das erzeugt unter `reports/`:
 
 Dieses Tool ist darauf ausgelegt, einen *ehrlichen* Fall zu machen, keinen konstruierten. Es zeigt bewusst Probleme auf **deiner** Seite (Hausverkabelung, überlastetes Mess-Gerät), damit der Teil, den du dem Provider zuschreibst, sauber und belastbar ist. Wenn dein Router einen Hausverkabelungsfehler meldet, behebe den zuerst — sonst zeigt der Provider zu Recht darauf.
 
-Für eine rechtlich anerkannte Messung (zumindest in Deutschland) kombiniere NetWatchs durchgehende Aufzeichnung mit der offiziellen **Breitbandmessung-Desktop-App der Bundesnetzagentur**. NetWatch ist die Langzeit-Dokumentation rund um diese Momentaufnahme.
+Für eine offizielle Einzelmessung kombiniere NetWatchs durchgehende Aufzeichnung mit einem offiziellen Messtool (z. B. **networktest.ch**). NetWatch ist die Langzeit-Dokumentation rund um diese Momentaufnahme; die Bewertung im Report nutzt gebräuchliche Richtwerte (90 %, 80 %) zur Orientierung, keinen Gesetzesbezug.
 
 ---
 
@@ -206,4 +206,4 @@ MIT — siehe [LICENSE](LICENSE).
 
 ## Haftungsausschluss
 
-NetWatch ist ein Mess- und Dokumentationswerkzeug. Es ist keine Rechtsberatung, und seine Ausgabe ist für sich allein keine rechtsverbindliche Messung. Für formale Streitfälle kombiniere es mit den offiziellen Messverfahren deines Providers und deiner nationalen Regulierungsbehörde.
+NetWatch ist ein Mess- und Dokumentationswerkzeug und keine Rechtsberatung. Seine Ausgabe ist eine technische Langzeit-Dokumentation, keine einmalige kalibrierte Messung. Für formale Streitfälle kombiniere es mit einem offiziellen Messtool (z. B. networktest.ch).

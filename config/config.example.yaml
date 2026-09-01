@@ -103,7 +103,8 @@ fritzbox:
   password: ""
   # Contracted line speed in Mbit/s for the contract-vs-actual comparison.
   # Vertragswerte aus dem Produktinformationsblatt / der Vertragszusammenfassung.
-  # Regulatoren (z.B. DE Bundesnetzagentur) bewerten drei Werte. 0 = nicht gesetzt.
+  # Drei Werte (Maximum / normal verfuegbar / Minimum); der Report vergleicht
+  # sie gegen gebraeuchliche Richtwerte. 0 = nicht gesetzt.
   contract_download_mbps: 0            # MAXIMUM Download in Mbit/s (0 = Vergleich aus)
   contract_upload_mbps: 0              # MAXIMUM Upload in Mbit/s
   contract_normal_download_mbps: 0     # "normalerweise zur Verfuegung stehend" Download

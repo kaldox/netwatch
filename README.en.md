@@ -145,7 +145,7 @@ This produces, under `reports/`:
 
 This tool is designed to make an *honest* case, not to manufacture one. It explicitly surfaces problems on **your** side (in-home wiring, an overloaded measuring device) so that the part you attribute to the provider is clean and defensible. If your router reports an in-home cabling defect, fix that first — otherwise the provider will rightly point to it.
 
-For a legally recognised measurement (at least in Germany), pair NetWatch's continuous record with the official **Bundesnetzagentur Breitbandmessung** desktop app. NetWatch is the long-term documentation around that snapshot.
+For a one-off official measurement, pair NetWatch's continuous record with an official measurement tool (e.g. **networktest.ch**). NetWatch is the long-term documentation around that snapshot; the report's evaluation uses common reference thresholds (90%, 80%) for orientation, not any statute.
 
 ---
 
@@ -219,4 +219,4 @@ MIT — see [LICENSE](LICENSE).
 
 ## Disclaimer
 
-NetWatch is a measurement and documentation tool. It is not legal advice, and its output is not by itself a legally binding measurement. For formal disputes, combine it with your provider's and your national regulator's official measurement procedures.
+NetWatch is a measurement and documentation tool, not legal advice. Its output is a long-term technical record, not a one-off calibrated measurement. For formal disputes, combine it with an official measurement tool (e.g. networktest.ch).
