@@ -48,7 +48,7 @@ Entscheidend: Es erfasst auch die **eigene Last des Mess-Geräts** (CPU, RAM, Te
 - **Selbst-Monitoring** — CPU / RAM / Temperatur / Zykluszeit pro Messung, um das Mess-Gerät als Ursache auszuschließen
 - **Manipulationssicherer Speicher** — Append-only SQLite, Beweis-Dateien pro Ereignis
 - **Lokales Web-Dashboard** — dunkel, offline-fähig, mit Klartext-Bewertung zu jedem Befund
-- **Provider-Nachweisexport** — PDF-Report + CSV-Rohdaten, mit sauberer Trennung der drei Schichten
+- **Provider-Nachweisexport** — PDF-Report (mit **Fazit** ganz oben) + CSV-Rohdaten, mit sauberer Trennung der drei Schichten; per Knopfdruck im Dashboard oder via CLI
 
 ---
 
@@ -113,7 +113,9 @@ fritzbox:
 
 ## Der Provider-Nachweisexport
 
-Wenn NetWatch ein bis zwei Wochen Daten gesammelt hat:
+Wenn NetWatch ein bis zwei Wochen Daten gesammelt hat, entweder direkt im Dashboard
+unter **ISP-Nachweise → „Provider-Nachweis exportieren"** (Zeitraum wählen, Download-Links)
+oder auf der Kommandozeile:
 
 ```bash
 sudo -u netwatch /opt/netwatch/venv/bin/python -m src.export_cli 14
@@ -121,7 +123,7 @@ sudo -u netwatch /opt/netwatch/venv/bin/python -m src.export_cli 14
 
 Das erzeugt unter `reports/`:
 
-- **`netwatch_providernachweis_<datum>.pdf`** — strukturierter Report mit Trennung Hausverkabelung / Leitung / Provider und einer Mess-Integritäts-Erklärung
+- **`netwatch_providernachweis_<datum>.pdf`** — strukturierter Report mit **Fazit** ganz oben (farbcodierte Gesamtbewertung + Kernbefund-Tabelle), Trennung Hausverkabelung / Leitung / Provider und einer Mess-Integritäts-Erklärung
 - **`netwatch_speedtests_<datum>.csv`** — jeder Durchsatztest mit dem Leitungs-Sync daneben
 - **`netwatch_fritzbox_<datum>.csv`** — Leitungs-Sync / Max / SNR / Dämpfung über die Zeit
 - **`netwatch_fritzbox_log_<datum>.csv`** — klassifizierte Router-Log-Ereignisse (Sync-Änderungen, Abbrüche, Verkabelungsfehler)

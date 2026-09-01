@@ -66,6 +66,9 @@ def _styles():
     styles.add(ParagraphStyle(
         "NWSub", parent=styles["Normal"], fontSize=10, textColor=GREY, spaceAfter=14))
     styles.add(ParagraphStyle(
+        "NWFazit", parent=styles["Heading1"], fontSize=15, textColor=BRAND,
+        spaceBefore=2, spaceAfter=8))
+    styles.add(ParagraphStyle(
         "NWH2", parent=styles["Heading2"], fontSize=13, textColor=BRAND,
         spaceBefore=14, spaceAfter=6))
     styles.add(ParagraphStyle(
@@ -282,6 +285,119 @@ def _evaluate_contract(a: dict[str, Any], contract_max: float,
 
 
 # ---------------------------------------------------------------------------
+# Executive summary ("Fazit")
+# ---------------------------------------------------------------------------
+
+def _summarise(db: Database, cfg: AppConfig, a: dict[str, Any],
+               contract_eval: dict[str, Any]) -> dict[str, Any]:
+    """Condense the whole analysis into one headline verdict plus the concrete
+    findings that justify it. Rendered at the very top of the report so a
+    reader who only skims the first page still gets the bottom line."""
+    c_max = cfg.fritzbox.contract_download_mbps
+    fb = a["fb_latest"]
+    dsl_max = fb.get("dsl_down_max_mbps")
+
+    # ISP outages the FritzBox's own WAN state confirms as a line drop
+    # (same criterion as chapter 2's detail table).
+    line_drops = 0
+    for e in a["isp_events"]:
+        fbs = db.get_fritzbox_status(event_id=e.get("event_id"), limit=1)
+        if not fbs:
+            continue
+        conn = fbs[0].get("connection_status")
+        ut = fbs[0].get("wan_uptime_seconds")
+        if (conn and conn != "Connected") or (ut is not None and ut < 300):
+            line_drops += 1
+
+    throttle_pct = None
+    if a["down_avg"] is not None and a["sync_down_avg"]:
+        throttle_pct = a["down_avg"] / a["sync_down_avg"] * 100
+
+    dsl_cant_meet = bool(dsl_max and c_max and dsl_max < c_max * 0.95)
+    contract_deviation = bool(contract_eval.get("has_data") and contract_eval.get("deviation"))
+
+    findings: list[str] = []
+    severity = "green"  # green < orange < red
+
+    if contract_deviation:
+        severity = "red"
+        violated = [name for name, _req, _res, ok in contract_eval["criteria"] if not ok]
+        findings.append(
+            "Anerkannte Geschwindigkeits-Kriterien (Bundesnetzagentur Vfg 99/2021) "
+            "verletzt: " + ", ".join(violated) + " (Details in Kapitel 1)."
+        )
+    if dsl_cant_meet:
+        severity = "red"
+        findings.append(
+            f"Die Leitung erreicht physikalisch maximal {dsl_max:.1f} Mbit/s und kann den "
+            f"vertraglichen Maximalwert ({c_max:.0f} Mbit/s) nicht erfüllen (Kapitel 5)."
+        )
+    if line_drops:
+        severity = "red"
+        findings.append(
+            f"{line_drops} von {len(a['isp_events'])} Anbieter-Ausfällen sind durch das "
+            f"Ereignisprotokoll der FritzBox als Leitungsabriss bestätigt (Kapitel 2/3)."
+        )
+    if throttle_pct is not None and throttle_pct < 50:
+        severity = "red"
+        findings.append(
+            f"Vom synchronisierten Leitungsdurchsatz kommen im Schnitt nur "
+            f"{throttle_pct:.0f}% an ({a['down_avg']:.1f} von {a['sync_down_avg']:.1f} "
+            f"Mbit/s) — Drosselung im Providernetz wahrscheinlich (Kapitel 6)."
+        )
+
+    # Softer signals: lift to orange only if nothing above already made it red.
+    if severity != "red":
+        if a["isp_events"]:
+            severity = "orange"
+            findings.append(
+                f"{len(a['isp_events'])} Anbieter-Ausfall/-Ausfälle dokumentiert, "
+                f"Gesamt-Ausfallzeit {format_duration(a['total_downtime'])} (Kapitel 2)."
+            )
+        if a["disconnects"] or a["sync_changes"]:
+            severity = "orange"
+            findings.append(
+                f"{len(a['disconnects'])} Zwangstrennungen und {len(a['sync_changes'])} "
+                f"Neusynchronisierungen im Router-Protokoll — Hinweis auf eine instabile "
+                f"Anbieter-Leitung (Kapitel 3/7)."
+            )
+        if throttle_pct is not None and throttle_pct < 80:
+            severity = "orange"
+            findings.append(
+                f"Die Leitung wird im Schnitt nur zu {throttle_pct:.0f}% ausgenutzt "
+                f"({a['down_avg']:.1f} von {a['sync_down_avg']:.1f} Mbit/s) — beobachten "
+                f"(Kapitel 6)."
+            )
+        if a["avg_avail"] is not None and a["avg_avail"] < 99.9:
+            severity = "orange"
+            findings.append(
+                f"Durchschnittliche Verfügbarkeit {a['avg_avail']:.3f}% liegt unter 99,9% "
+                f"(Kapitel 2)."
+            )
+
+    if not findings:
+        findings.append(
+            "Im Messzeitraum sind weder eine erhebliche Vertragsabweichung noch "
+            "anbieterseitig verursachte Ausfälle belegt."
+        )
+
+    headline = {
+        "red": "Erhebliche Abweichung bzw. Anbieterstörung belegt",
+        "orange": "Auffälligkeiten dokumentiert – Beobachtung bzw. Nachfrage beim Anbieter angezeigt",
+        "green": "Keine erhebliche Vertragsabweichung im Messzeitraum belegt",
+    }[severity]
+
+    return {
+        "severity": severity,
+        "headline": headline,
+        "findings": findings,
+        "line_drops": line_drops,
+        "throttle_pct": throttle_pct,
+        "contract_deviation": contract_deviation,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 
@@ -297,6 +413,9 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     c_norm = cfg.fritzbox.contract_normal_download_mbps
     c_min = cfg.fritzbox.contract_min_download_mbps
     dsl_max = fb.get("dsl_down_max_mbps")
+
+    # Evaluated once up front so the executive summary and chapter 1 agree.
+    contract_eval = _evaluate_contract(a, c_max, c_norm, c_min)
 
     pdf_path = output_dir / f"netwatch_providernachweis_{ts}.pdf"
     doc = SimpleDocTemplate(
@@ -314,6 +433,49 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
         f"Messzeitraum {period_from} – {period_to} ({days} Tage) · "
         f"Messsystem: NetWatch (Raspberry Pi, LAN-Kabel an Router)",
         styles["NWSub"]))
+
+    # ---- Fazit (executive summary — deliberately the first thing on the page) ----
+    summary = _summarise(db, cfg, a, contract_eval)
+    story.append(Paragraph("Fazit", styles["NWFazit"]))
+    _sev_color = {"red": RED, "orange": ORANGE, "green": GREEN}[summary["severity"]]
+    _bullets = "<br/>".join("•&nbsp;" + f for f in summary["findings"])
+    story.append(_verdict_box(
+        f"<b>{summary['headline']}.</b><br/>{_bullets}", _sev_color))
+    story.append(Spacer(1, 8))
+
+    throttle_txt = (f"{summary['throttle_pct']:.0f}%"
+                    if summary["throttle_pct"] is not None else "–")
+    down_txt = _fmt_num(a["down_avg"], " Mbit/s")
+    if c_max and a["down_avg"] is not None:
+        down_txt += f"  ({a['down_avg'] / c_max * 100:.0f}% des Vertrags-Max {c_max:.0f})"
+    kb_rows = [
+        ["Kennwert", "Ergebnis"],
+        ["Messzeitraum", f"{period_from} – {period_to} ({days} Tage)"],
+        ["Erfolgreiche Durchsatzmessungen",
+         f"{a['speedtest_count']} an {len(a['measurement_days'])} Messtagen"],
+        ["Ø Download (real)", down_txt],
+        ["Leitungsausnutzung (real / Sync)", throttle_txt],
+        ["Ø Verfügbarkeit",
+         f"{a['avg_avail']:.3f}%" if a["avg_avail"] is not None else "–"],
+        ["Gesamt-Ausfallzeit", format_duration(a["total_downtime"])],
+        ["Anbieter-Ausfälle (ISP)",
+         f"{len(a['isp_events'])} (davon {summary['line_drops']} per Router bestätigt)"],
+        ["Zwangstrennungen / Resyncs (Router)",
+         f"{len(a['disconnects'])} / {len(a['sync_changes'])}"],
+    ]
+    if contract_eval.get("has_data") and contract_eval.get("criteria"):
+        kb_rows.append(["Vertragsbewertung (Vfg 99/2021)",
+                        "Abweichung belegt" if summary["contract_deviation"]
+                        else "Kriterien im Messzeitraum eingehalten"])
+    else:
+        kb_rows.append(["Vertragsbewertung (Vfg 99/2021)",
+                        "keine Vertragswerte hinterlegt — Bewertung übersprungen"])
+    story.append(_table(kb_rows, col_widths=[5.6 * cm, 9.2 * cm]))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        "Die vollständige Herleitung mit allen Belegen folgt ab „Datengrundlage &amp; "
+        "Methodik“. Alle Rohdaten liegen als CSV-Dateien bei.", styles["NWSmall"]))
+    story.append(Spacer(1, 12))
 
     # ---- 0. Data basis & methodology ----
     story.append(Paragraph("Datengrundlage &amp; Methodik", styles["NWH2"]))
@@ -376,7 +538,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
         story.append(_table(ct_rows, col_widths=[4.2*cm, 3.2*cm, 4.6*cm, 2.8*cm]))
         story.append(Spacer(1, 6))
 
-        ev = _evaluate_contract(a, c_max, c_norm, c_min)
+        ev = contract_eval
         if ev["has_data"] and ev["criteria"]:
             crit_rows = [["Kriterium (angelehnt an Vfg 99/2021)", "Anforderung", "Ergebnis", "Status"]]
             for name, req, result, ok in ev["criteria"]:

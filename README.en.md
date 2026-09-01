@@ -48,7 +48,7 @@ Crucially, it also records the **monitoring device's own load** (CPU, RAM, tempe
 - **Self-monitoring** — CPU / RAM / temperature / cycle-time logged per measurement to rule out the measuring device as a cause
 - **Tamper-evident storage** — append-only SQLite, per-event evidence files
 - **Local web dashboard** — dark-themed, offline-capable, with a plain-language verdict on each finding
-- **Provider evidence export** — PDF report + CSV raw data, separating the three layers cleanly
+- **Provider evidence export** — PDF report (with a **verdict box** up top) + CSV raw data, separating the three layers cleanly; one click in the dashboard or via CLI
 
 ---
 
@@ -126,7 +126,9 @@ fritzbox:
 
 ## The provider evidence export
 
-Once NetWatch has collected a week or two of data:
+Once NetWatch has collected a week or two of data, either straight from the dashboard
+under **ISP-Nachweise → "Provider-Nachweis exportieren"** (pick a period, download links)
+or on the command line:
 
 ```bash
 sudo -u netwatch /opt/netwatch/venv/bin/python -m src.export_cli 14
@@ -134,7 +136,7 @@ sudo -u netwatch /opt/netwatch/venv/bin/python -m src.export_cli 14
 
 This produces, under `reports/`:
 
-- **`netwatch_providernachweis_<date>.pdf`** — a structured report separating home-wiring / line / provider, with a measurement-integrity statement
+- **`netwatch_providernachweis_<date>.pdf`** — a structured report with a **verdict box (Fazit)** up top (colour-coded overall assessment + key-findings table), separating home-wiring / line / provider, with a measurement-integrity statement
 - **`netwatch_speedtests_<date>.csv`** — every throughput test with the line sync alongside
 - **`netwatch_fritzbox_<date>.csv`** — line sync / max / SNR / attenuation over time
 - **`netwatch_fritzbox_log_<date>.csv`** — classified router log events (sync changes, disconnects, cabling defects)

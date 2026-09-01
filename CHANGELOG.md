@@ -13,6 +13,7 @@
 
 ## [Unreleased]
 ### Behoben
+- `/api/export/provider`: ungültiger `days`-Parameter (z. B. `?days=abc`) führte zu HTTP 500 statt eines Fallbacks — wird jetzt auf 1–365 begrenzt, unparsbare Werte fallen auf 14 zurück
 - DB-Aufblähung: `measurements`-Tabelle wird jetzt nach `measurement_retention_days` (Standard 30) gekürzt; VACUUM läuft danach
 - Event-Rauschen: Paketverlust-/Latenz-Events erst ab `min_affected_targets` (Standard 2) gleichzeitig betroffenen Zielen
 - Monats-Report wird durch `reports.auto_generate`/`generate_time` nun tatsächlich automatisch erzeugt (vorher ignoriert)
@@ -24,6 +25,8 @@
 - README.bl.md (Baseldütsch-Übersetzung) entfernt, inkl. Verweise in README.md/README.en.md
 
 ### Hinzugefügt
+- Dashboard: Button **„Provider-Nachweis exportieren"** auf der Seite *ISP-Nachweise* — löst den Export (`/api/export/provider`) direkt aus, mit Zeitraum-Auswahl (7–90 Tage), Fortschrittsanzeige und Download-Links zu PDF + allen CSVs. Der Endpunkt existierte schon, hatte aber keine Bedienoberfläche
+- Provider-Nachweis: **„Fazit"** ganz oben auf Seite 1 — farbcodierte Gesamtbewertung (rot/orange/grün) mit den konkreten Befunden (Vertragsabweichung nach Vfg 99/2021, per Router-Log bestätigte Leitungsabrisse, wahrscheinliche Drosselung, Leitungsinstabilität) plus kompakte Kernbefund-Tabelle, damit die Kernaussage auch bei nur überflogenem Bericht sofort ins Auge fällt
 - Provider-Nachweis überarbeitet: Methodik-Abschnitt, Vertragsbewertung nach anerkannten Kriterien (Bundesnetzagentur Vfg 99/2021: Maximum/Normal/Minimum), Verfügbarkeits-/Ausfall-Abschnitt mit Zeitstempeln, Schweizer 80%-Praxis (ombudscom), Rechtshinweis; neue Ausfall-CSV; Tabellen brechen sauber um
 - Config: contract_normal/min_download_mbps + _upload_mbps (drei Vertragswerte)
 - Docker-Support: `Dockerfile`, `docker-compose.yml` (Host-Netzwerk), `.dockerignore`, `DEPLOY-DOCKER.md`

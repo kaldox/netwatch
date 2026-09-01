@@ -268,7 +268,11 @@ def create_app(db: Database, cfg: AppConfig) -> Flask:
     @app.route("/api/export/provider")
     def api_export_provider():
         """Generate the provider evidence package and return file paths."""
-        days = int(request.args.get("days", 14))
+        try:
+            days = int(request.args.get("days", 14))
+        except (TypeError, ValueError):
+            days = 14
+        days = max(1, min(days, 365))
         try:
             from .export import generate_provider_report
             output_dir = _PROJECT_ROOT / cfg.reports.output_dir

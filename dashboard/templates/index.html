@@ -216,6 +216,21 @@ select,input{
 }
 select:focus,input:focus{border-color:var(--cyan)}
 
+/* ── BUTTON ── */
+button.btn{
+  padding:6px 14px;border-radius:7px;cursor:pointer;
+  font-size:12px;font-weight:600;font-family:var(--sans);letter-spacing:.3px;
+  background:var(--cyan-dim);border:1px solid var(--cyan-mid);color:var(--cyan);
+  transition:background .15s,border-color .15s,opacity .15s;
+}
+button.btn:hover{background:var(--cyan-mid);border-color:var(--cyan)}
+button.btn:disabled{opacity:.5;cursor:default}
+button.btn:disabled:hover{background:var(--cyan-dim);border-color:var(--cyan-mid)}
+.dl-list{list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:6px}
+.dl-list a{color:var(--cyan);text-decoration:none;font-weight:500}
+.dl-list a:hover{text-decoration:underline}
+.dl-list .fname{color:var(--text3);font-family:var(--mono);font-size:11px}
+
 /* ── PRE ── */
 pre{
   background:var(--s2);border:1px solid var(--border);
@@ -526,7 +541,20 @@ canvas{max-width:100%}
 
 <!-- ══════════════ ISP ══════════════ -->
 <div id="page-isp" class="page">
-  <div class="section-hd"><h2>ISP-Nachweise</h2></div>
+  <div class="section-hd">
+    <h2>ISP-Nachweise</h2>
+    <div class="row">
+      <select id="export-days" aria-label="Zeitraum für den Export">
+        <option value="7">7 Tage</option>
+        <option value="14" selected>14 Tage</option>
+        <option value="30">30 Tage</option>
+        <option value="60">60 Tage</option>
+        <option value="90">90 Tage</option>
+      </select>
+      <button id="export-btn" class="btn" onclick="runProviderExport()">Provider-Nachweis exportieren</button>
+    </div>
+  </div>
+  <div id="export-result" class="card" style="display:none;margin-bottom:16px"></div>
   <div class="isp-metrics">
     <div class="isp-metric">
       <div class="num" style="color:var(--red)" id="isp-count">–</div>
@@ -1177,6 +1205,59 @@ async function loadIpHistory() {
   document.getElementById('ip-table').innerHTML = trs
     ? `<table><thead><tr><th>Zeitpunkt</th><th>IPv4</th><th>IPv6</th><th>Änderung</th></tr></thead><tbody>${trs}</tbody></table>`
     : '<div class="empty">Keine Daten</div>';
+}
+
+// ── Provider evidence export ──
+// Triggers the server-side package build (/api/export/provider) and lists the
+// generated PDF + CSV files as direct download links (/reports/<file>).
+const EXPORT_LABELS = {
+  pdf:        'PDF-Bericht — Provider-Nachweis (mit Fazit)',
+  speedtests: 'Durchsatzmessungen (CSV)',
+  fritzbox:   'FritzBox-Leitungsdaten (CSV)',
+  ausfaelle:  'Ausfälle / Ereignisse (CSV)',
+  log:        'FritzBox-Ereignislog (CSV)',
+};
+async function runProviderExport() {
+  const btn  = document.getElementById('export-btn');
+  const box  = document.getElementById('export-result');
+  const days = document.getElementById('export-days')?.value || 14;
+  const label = btn.textContent;
+
+  btn.disabled = true;
+  btn.textContent = 'Erstelle Nachweis…';
+  box.style.display = 'block';
+  box.innerHTML =
+    `<div class="card-label">Export läuft — ${days} Tage</div>
+     <div style="color:var(--text2);font-size:12px;margin-top:6px">
+       PDF-Bericht und CSV-Rohdaten werden auf dem Messgerät erzeugt. Das dauert einen Moment.</div>`;
+
+  try {
+    const res  = await fetch(`/api/export/provider?days=${encodeURIComponent(days)}`);
+    let data = {};
+    try { data = await res.json(); } catch (_) { /* non-JSON error body */ }
+    if (!res.ok || data.status !== 'ok') {
+      throw new Error(data.error || `HTTP ${res.status} ${res.statusText}`);
+    }
+    const items = Object.entries(data.files || {}).map(([key, name]) => `
+      <li>
+        <a href="/reports/${encodeURIComponent(name)}" download>${escHtml(EXPORT_LABELS[key] || key)}</a>
+        <span class="fname">${escHtml(name)}</span>
+      </li>`).join('');
+    box.innerHTML =
+      `<div class="card-label" style="color:var(--green)">Export fertig — ${days} Tage</div>
+       <ul class="dl-list">${items || '<li style="color:var(--text2)">Keine Dateien erzeugt.</li>'}</ul>
+       <div style="color:var(--text3);font-size:11px;margin-top:10px">
+         Abgelegt unter <span class="mono">${escHtml(data.directory || 'reports/')}</span> auf dem Messgerät.
+         Die Links laden die eben erzeugte Version.</div>`;
+  } catch (err) {
+    box.innerHTML =
+      `<div class="card-label" style="color:var(--red)">Export fehlgeschlagen</div>
+       <div style="color:var(--text2);font-size:12px;margin-top:6px">${escHtml(String(err.message || err))}</div>
+       <div style="color:var(--text3);font-size:11px;margin-top:6px">Details stehen im NetWatch-Log.</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
 }
 
 // ── ISP ──
