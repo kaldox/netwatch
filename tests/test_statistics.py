@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -97,6 +97,23 @@ class TestDailyStats:
         stats = compute_daily_stats(events, [], date(2024, 1, 15))
         assert stats.downtime_seconds <= 86400.0
         assert stats.availability_percent >= 0.0
+
+    def test_open_event_counts_to_end_of_day_without_now(self):
+        events = [_make_event("ISP_FAILURE", started_at="2024-01-15T22:00:00+00:00",
+                              ended_at=None, duration_seconds=None)]
+        stats = compute_daily_stats(events, [], date(2024, 1, 15))
+        # 22:00 -> 23:59:59 ≈ 2h
+        assert 7000 <= stats.downtime_seconds <= 7200
+
+    def test_open_event_capped_at_now(self):
+        started = "2024-01-15T10:00:00+00:00"
+        now = datetime(2024, 1, 15, 11, 0, 0, tzinfo=timezone.utc)
+        events = [_make_event("ISP_FAILURE", started_at=started,
+                              ended_at=None, duration_seconds=None)]
+        capped = compute_daily_stats(events, [], date(2024, 1, 15), now=now)
+        uncapped = compute_daily_stats(events, [], date(2024, 1, 15))
+        assert 3500 <= capped.downtime_seconds <= 3700
+        assert uncapped.downtime_seconds > capped.downtime_seconds
 
     def test_event_type_counts(self):
         events = [

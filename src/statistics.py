@@ -64,6 +64,7 @@ def compute_daily_stats(
     events: list[dict[str, Any]],
     measurements: list[dict[str, Any]],
     target_date: date,
+    now: Optional[datetime] = None,
 ) -> DailyStats:
     """
     Compute statistics for a single calendar day.
@@ -71,6 +72,11 @@ def compute_daily_stats(
     :param events: All events that started within the target day.
     :param measurements: All measurements taken during the target day.
     :param target_date: The date to compute stats for.
+    :param now: Current time (aware). When given, an outage that is still
+        open is only counted as downtime up to ``now`` instead of up to the
+        end of the day — needed when aggregating the current, in-progress
+        day so a single active outage doesn't book the whole rest of the day
+        as downtime.
     """
     date_str = target_date.isoformat()
 
@@ -93,12 +99,15 @@ def compute_daily_stats(
         if ev.get("ended_at") is None:
             try:
                 started = datetime.fromisoformat(ev["started_at"])
-                end_of_day = datetime(
+                cutoff = datetime(
                     target_date.year, target_date.month, target_date.day,
                     23, 59, 59, tzinfo=timezone.utc,
                 )
-                duration = (end_of_day - started).total_seconds()
-                duration = max(0.0, duration)
+                if now is not None:
+                    now_utc = (now.astimezone(timezone.utc)
+                               if now.tzinfo else now.replace(tzinfo=timezone.utc))
+                    cutoff = min(cutoff, now_utc)
+                duration = max(0.0, (cutoff - started).total_seconds())
             except Exception:
                 duration = 0.0
 

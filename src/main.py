@@ -405,22 +405,33 @@ class NetWatch:
     # ------------------------------------------------------------------
 
     def _compute_daily_stats_if_needed(self) -> None:
-        today_str = date.today().isoformat()
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        today = date.today()
+        yesterday = today - timedelta(days=1)
 
-        if self._last_daily_stats == yesterday:
-            return
-        self._last_daily_stats = yesterday
+        # Finalise yesterday's stats once, right after the day rolls over.
+        if self._last_daily_stats != yesterday.isoformat():
+            self._last_daily_stats = yesterday.isoformat()
+            self._compute_and_store_daily_stats(yesterday)
 
-        # Compute for yesterday
-        target_date = date.fromisoformat(yesterday)
-        start_ts = f"{yesterday}T00:00:00"
-        end_ts = f"{yesterday}T23:59:59"
+        # Always refresh *today* on every maintenance tick. The previous logic
+        # only ever aggregated yesterday, so outages from the current day —
+        # and on the 1st of a month the entire month — were missing from the
+        # daily_statistics table, and therefore from the monthly rollup, the
+        # dashboard overview cards and the provider report, until the next
+        # midnight.
+        self._compute_and_store_daily_stats(today)
 
-        events = self.db.get_events(start=start_ts, end=end_ts, limit=1000)
+    def _compute_and_store_daily_stats(self, target_date: date) -> None:
+        day = target_date.isoformat()
+        start_ts = f"{day}T00:00:00"
+        end_ts = f"{day}T23:59:59"
+
+        events = self.db.get_events(start=start_ts, end=end_ts, limit=5000)
         measurements = self.db.get_measurements_range(start=start_ts, end=end_ts)
 
-        stats = compute_daily_stats(events, measurements, target_date)
+        # Cap open outages at "now" only for the current, in-progress day.
+        now = datetime.now(timezone.utc) if target_date == date.today() else None
+        stats = compute_daily_stats(events, measurements, target_date, now=now)
         self.db.upsert_daily_stat(
             DailyStatRow(
                 date_str=stats.date_str,
@@ -440,7 +451,7 @@ class NetWatch:
         )
         logger.info(
             "Daily stats computed for %s: availability=%.3f%% downtime=%ss outages=%d",
-            yesterday, stats.availability_percent, stats.downtime_seconds, stats.outage_count,
+            day, stats.availability_percent, stats.downtime_seconds, stats.outage_count,
         )
 
     # ------------------------------------------------------------------
@@ -745,6 +756,13 @@ class NetWatch:
         self._start_dashboard()
         self._start_speedtest_loop()
         self._refresh_public_ip(force=True)
+
+        # Bring daily_statistics current on boot so the dashboard/monthly
+        # rollup are right immediately instead of after the first ~100 cycles.
+        try:
+            self._compute_daily_stats_if_needed()
+        except Exception as exc:
+            logger.error("Initial daily stats computation failed: %s", exc, exc_info=True)
 
         logger.info(
             "Monitoring started – interval=%ds targets=%d",

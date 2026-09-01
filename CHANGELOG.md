@@ -13,6 +13,8 @@
 
 ## [Unreleased]
 ### Behoben
+- Dashboard-Übersicht & Monats-Rollup zählten Ausfälle des **laufenden Tages** nicht: `daily_statistics` wurde nur einmal täglich *für gestern* aggregiert. Heutige Ereignisse (am Monatsersten der ganze Monat) fehlten dadurch in „Ausfälle gesamt", „ISP-Ausfälle (aktueller Monat)", der Verfügbarkeits-Anzeige und im Provider-Nachweis — bis Mitternacht. Der aktuelle Tag wird jetzt bei jedem Wartungs-Tick (~alle 8 min) und beim Start mitberechnet; laufende Ausfälle zählen dabei nur bis „jetzt" statt bis Tagesende als Ausfallzeit
+- Übersicht: Ring-Label „30 Tage" zeigte tatsächlich die Verfügbarkeit des aktuellen Kalendermonats → jetzt „Monat"
 - `/api/export/provider`: ungültiger `days`-Parameter (z. B. `?days=abc`) führte zu HTTP 500 statt eines Fallbacks — wird jetzt auf 1–365 begrenzt, unparsbare Werte fallen auf 14 zurück
 - DB-Aufblähung: `measurements`-Tabelle wird jetzt nach `measurement_retention_days` (Standard 30) gekürzt; VACUUM läuft danach
 - Event-Rauschen: Paketverlust-/Latenz-Events erst ab `min_affected_targets` (Standard 2) gleichzeitig betroffenen Zielen
