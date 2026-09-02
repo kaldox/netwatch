@@ -547,8 +547,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             if ev["deviation"]:
                 story.append(_verdict_box(
                     "<b>Befund:</b> Mindestens ein Richtwert wird nicht erreicht — die "
-                    "gemessene Leistung weicht deutlich von den Vertragswerten ab. Das ist "
-                    "der Ansatzpunkt für eine Reklamation bei der Anbieterin.", RED))
+                    "gemessene Leistung weicht deutlich von den Vertragswerten ab.", RED))
             else:
                 story.append(_verdict_box(
                     "<b>Befund:</b> Die Richtwerte werden im Messzeitraum eingehalten. "
@@ -874,14 +873,12 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
                 styles["NWSmall"]))
 
     story.append(Spacer(1, 8))
-    story.append(Paragraph("Hinweis zur Verwendung", styles["NWH3"]))
+    story.append(Paragraph("Einordnung", styles["NWH3"]))
     story.append(Paragraph(
-        "Dieser Bericht ist eine automatisch erstellte technische Dokumentation, keine "
-        "einmalige kalibrierte Messung. Für eine Reklamation wird das Protokoll direkt bei "
-        "der Anbieterin vorgelegt; ergänzend lässt sich eine offizielle Messung "
-        "(z. B. networktest.ch) heranziehen, im Streitfall die Schlichtungsstelle (ombudscom). "
-        "Die verwendeten Prozentwerte (90 %, 80 %) sind gebräuchliche Richtwerte zur "
-        "Orientierung, kein Gesetzesbezug.",
+        "Dieser Bericht ist eine automatisch erstellte technische Dokumentation auf Basis "
+        "kontinuierlicher Messungen über den gesamten Messzeitraum, keine einmalige "
+        "kalibrierte Momentaufnahme. Die verwendeten Prozentwerte (90 %, 80 %) sind "
+        "gebräuchliche Richtwerte zur Orientierung und stellen keinen Gesetzesbezug dar.",
         styles["NWSmall"]))
 
     def _footer(canvas, doc_):
