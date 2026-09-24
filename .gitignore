@@ -45,3 +45,7 @@ Thumbs.db
 *.bak
 *.orig
 netwatch-backups/
+
+# ── Local ──
+.venv/
+docker-compose.override.yml

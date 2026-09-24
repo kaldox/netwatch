@@ -10,10 +10,11 @@ services:
     # it would only see Docker's internal bridge network.
     network_mode: host
 
-    # ICMP ping and mtr need raw sockets.
+    # ICMP ping and mtr need raw sockets. NET_ADMIN is NOT needed (NetWatch only
+    # reads the routing table via "ip route show"); it was dropped on 2026-09-24
+    # so the container can no longer change the host's interfaces or firewall.
     cap_add:
       - NET_RAW
-      - NET_ADMIN
 
     environment:
       - TZ=Europe/Zurich
@@ -26,3 +27,17 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./reports:/app/reports
+
+    # Typical use is ~160 MB; the limit only stops a runaway process from
+    # starving the host (needs the memory cgroup, see DEPLOY-DOCKER.md).
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# Host-specific additions (e.g. env_file with the Telegram bot token) belong in
+# docker-compose.override.yml next to this file – docker compose reads it
+# automatically and it is git-ignored, so updates never conflict with it.

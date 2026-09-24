@@ -38,6 +38,11 @@ from src.traceroute import run_diagnostics
 
 logger = logging.getLogger(__name__)
 
+# Timeout per provider for the public-IP lookup (runs in a background thread, see _refresh_public_ip)
+_IP_LOOKUP_TIMEOUT = 5
+# Marker for the last full VACUUM (the date survives restarts; see _vacuum_if_needed)
+_VACUUM_MARKER = _PROJECT_ROOT / "database" / ".last_vacuum"
+
 
 # ---------------------------------------------------------------------------
 # Orchestrator
@@ -80,6 +85,7 @@ class NetWatch:
 
         self._stop_event = threading.Event()
         self._last_public_ip_check = 0.0
+        self._ip_thread: Optional[threading.Thread] = None
         self._last_daily_stats = ""   # date string of last computed stats
         self._last_report_date = ""   # date string of last auto-generated report
         self._last_traceroute_time: dict[str, float] = {}
@@ -104,39 +110,60 @@ class NetWatch:
     # ------------------------------------------------------------------
 
     def _refresh_public_ip(self, force: bool = False) -> None:
+        """Start the public-IP lookup without blocking the measurement loop.
+
+        The lookup talks to external services (several providers × timeout). Run inline, a slow or
+        unreachable provider stalled the whole loop for up to a minute – leaving a gap in the
+        measurements exactly when the network misbehaves. Only the very first lookup at startup
+        (force=True) runs inline, so the first measurements already carry the IP."""
         now = time.monotonic()
         if not force and now - self._last_public_ip_check < self.cfg.public_ip.check_interval_seconds:
             return
-
+        if self._ip_thread is not None and self._ip_thread.is_alive():
+            return  # previous lookup still running – don't pile up threads
         self._last_public_ip_check = now
-        ipv4 = get_public_ip(self.cfg.public_ip.providers)
-        ipv6 = get_public_ip(self.cfg.public_ip.ipv6_providers)
+        if force:
+            self._check_public_ip()
+            return
+        self._ip_thread = threading.Thread(target=self._check_public_ip, daemon=True, name="public-ip")
+        self._ip_thread.start()
 
-        latest = self.db.get_latest_public_ip()
-        changed = (
-            latest is None
-            or latest.get("ipv4") != ipv4
-            or latest.get("ipv6") != ipv6
-        )
+    def _check_public_ip(self) -> None:
+        """Look up the public IP and record a change.
 
-        if changed or latest is None:
-            self.db.insert_public_ip(
-                PublicIpRow(
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    ipv4=ipv4,
-                    ipv6=ipv6,
-                    changed=1 if (latest and changed) else 0,
+        A failed lookup (None, e.g. during an outage or when the lookup service hiccups) is *unknown*,
+        not a change: the last known address is kept. Before 2026-09-24 every failed lookup was stored
+        as a change and the recovery as a second one – the monthly report counted ~169 "IP changes"
+        where only 15 real ones happened."""
+        try:
+            ipv4 = get_public_ip(self.cfg.public_ip.providers, timeout=_IP_LOOKUP_TIMEOUT)
+            ipv6 = get_public_ip(self.cfg.public_ip.ipv6_providers, timeout=_IP_LOOKUP_TIMEOUT)
+            latest = self.db.get_latest_public_ip()   # latest *known* address
+            if ipv4 is None and ipv6 is None:
+                logger.info("Public IP lookup failed – keeping last known address")
+                return
+            prev4 = latest.get("ipv4") if latest else None
+            prev6 = latest.get("ipv6") if latest else None
+            new4 = ipv4 if ipv4 is not None else prev4   # one family unknown → keep its last value
+            new6 = ipv6 if ipv6 is not None else prev6
+            changed = latest is not None and (new4 != prev4 or new6 != prev6)
+
+            if changed or latest is None:
+                self.db.insert_public_ip(
+                    PublicIpRow(
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        ipv4=new4,
+                        ipv6=new6,
+                        changed=1 if changed else 0,
+                    )
                 )
-            )
-            if latest and changed:
-                logger.warning(
-                    "Public IP changed! was=%s now=%s (v6: %s→%s)",
-                    latest.get("ipv4"), ipv4, latest.get("ipv6"), ipv6,
-                )
-            else:
-                logger.debug("Public IP: %s / %s", ipv4, ipv6)
-
-        self.monitor.set_public_ips(ipv4, ipv6)
+                if changed:
+                    logger.warning("Public IP changed! was=%s now=%s (v6: %s→%s)", prev4, new4, prev6, new6)
+                else:
+                    logger.debug("Public IP: %s / %s", new4, new6)
+            self.monitor.set_public_ips(new4, new6)
+        except Exception as exc:  # never let the lookup thread die silently
+            logger.error("Public IP check failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Measurement loop
@@ -484,11 +511,25 @@ class NetWatch:
                     logger.info("Pruned %d old fritzbox_status rows (>90 days)", deleted)
             except Exception as exc:
                 logger.error("fritzbox_status pruning failed: %s", exc)
-            # VACUUM last, so pages freed by the prunes above are reclaimed now
+            # VACUUM only every `vacuum_interval_days` (config). It rewrites the whole file (~1 GB) and
+            # holds the DB lock meanwhile; until 2026-09-24 it ran daily although the config said 7 days.
+            # In between, pages freed by the prunes are simply reused by new rows.
             try:
-                self.db.vacuum()
+                if self._vacuum_due(today):
+                    self.db.vacuum()
+                    _VACUUM_MARKER.write_text(today)
             except Exception as exc:
                 logger.error("Vacuum failed: %s", exc)
+
+    def _vacuum_due(self, today: str) -> bool:
+        interval = self.cfg.database.vacuum_interval_days
+        if interval <= 0:
+            return False
+        try:
+            last = date.fromisoformat(_VACUUM_MARKER.read_text().strip())
+        except (OSError, ValueError):
+            return True  # never vacuumed (or marker unreadable) → do it once now
+        return (date.fromisoformat(today) - last).days >= interval
 
     # ------------------------------------------------------------------
     # PDF report generation
@@ -510,7 +551,9 @@ class NetWatch:
 
         monthly = compute_monthly_stats(daily_stats, year, month)
 
-        ip_history = self.db.get_public_ip_history(limit=200)
+        # Everything up to the end of the month (earlier rows are needed to know the address at the
+        # start of the month); the report itself only counts changes within the month.
+        ip_history = self.db.get_public_ip_history(limit=5000, until=end + "T23:59:59")
 
         out_path = generate_monthly_report(
             output_dir=_PROJECT_ROOT / self.cfg.reports.output_dir,

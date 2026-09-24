@@ -120,9 +120,18 @@ def create_app(db: Database, cfg: AppConfig) -> Flask:
 
     @app.route("/api/public_ip")
     def api_public_ip():
+        """Known addresses only, newest first; `changed` recomputed from the sequence. Rows without an
+        address are failed lookups that older versions stored as a "change" (data stays untouched)."""
         limit = int(request.args.get("limit", 100))
-        rows = db.get_public_ip_history(limit=limit)
-        return jsonify(rows)
+        rows = [r for r in db.get_public_ip_history(limit=limit * 3) if r.get("ipv4") or r.get("ipv6")]
+        for newer, older in zip(rows, rows[1:]):
+            newer["changed"] = 1 if newer.get("ipv4") != older.get("ipv4") else 0
+        if rows:
+            rows[-1]["changed"] = 0
+        # Duplicates of the same address (left over from the failed-lookup rows) add nothing:
+        # keep the real changes plus the oldest row as starting point.
+        rows = [r for i, r in enumerate(rows) if r["changed"] or i == len(rows) - 1]
+        return jsonify(rows[:limit])
 
     @app.route("/api/daily_stats")
     def api_daily_stats():

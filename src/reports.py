@@ -111,6 +111,23 @@ def _styles() -> dict:
     }
 
 
+def real_ip_changes(
+    ip_history: list[dict[str, Any]], since: Optional[str] = None
+) -> list[dict[str, str]]:
+    """Real public-IPv4 changes: consecutive *known* addresses that differ, oldest first.
+
+    Rows without an address are failed lookups (older versions stored them during outages and
+    flagged both the failure and the recovery as "changed") – they are skipped, so an outage without
+    a new address counts as no change. `since` (ISO date/timestamp) keeps only changes from then on;
+    earlier rows are still used to know the address at the start of the period."""
+    known = sorted((r for r in ip_history if r.get("ipv4")), key=lambda r: r.get("timestamp", ""))
+    changes = []
+    for prev, cur in zip(known, known[1:]):
+        if cur["ipv4"] != prev["ipv4"] and (since is None or cur.get("timestamp", "") >= since):
+            changes.append({"timestamp": cur["timestamp"], "before": prev["ipv4"], "after": cur["ipv4"]})
+    return changes
+
+
 def _avail_color(pct: float) -> colors.Color:
     if pct >= 99.9:
         return GREEN
@@ -387,28 +404,23 @@ class ReportBuilder:
             self._p("5. Öffentliche IP-Adresse – Historie", "h1"),
             self._hr(),
         )
-        changes = [r for r in ip_history if r.get("changed")]
+        changes = real_ip_changes(ip_history, since=self._start.isoformat())
 
         self._add(
             self._p(
-                f"Insgesamt {len(changes)} IP-Wechsel im Berichtszeitraum. "
+                f"Insgesamt {len(changes)} Wechsel der öffentlichen IPv4-Adresse im Berichtszeitraum. "
+                "Fehlgeschlagene Abfragen (z. B. während eines Ausfalls) zählen nicht als Wechsel. "
                 "Häufige IP-Wechsel können auf Verbindungsunterbrechungen seitens des ISP hinweisen.",
                 "body",
             ),
         )
 
-        if ip_history:
-            headers = ["Zeitpunkt", "IPv4", "IPv6", "Geändert"]
+        if changes:
+            headers = ["Zeitpunkt (UTC)", "IPv4 vorher", "IPv4 danach"]
             rows = [headers]
-            for r in ip_history[:50]:
-                ts = r.get("timestamp", "")[:19].replace("T", " ")
-                rows.append([
-                    ts,
-                    r.get("ipv4") or "-",
-                    r.get("ipv6") or "-",
-                    "Ja" if r.get("changed") else "Nein",
-                ])
-            t = Table(rows, colWidths=[4 * cm, 4 * cm, 6 * cm, 2.5 * cm], repeatRows=1)
+            for c in changes[-50:]:
+                rows.append([c["timestamp"][:19].replace("T", " "), c["before"], c["after"]])
+            t = Table(rows, colWidths=[5 * cm, 5 * cm, 5 * cm], repeatRows=1)
             t.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), BRAND_BLUE),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

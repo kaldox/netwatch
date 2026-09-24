@@ -18,7 +18,7 @@ from typing import Any, Generator, Optional
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 11
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +188,8 @@ class Database:
                 self._migrate_v9(conn)
             if version < 10:
                 self._migrate_v10(conn)
+            if version < 11:
+                self._migrate_v11(conn)
 
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
 
@@ -212,8 +214,6 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_measurements_timestamp
                 ON measurements(timestamp);
-            CREATE INDEX IF NOT EXISTS idx_measurements_target
-                ON measurements(target_name, timestamp);
 
             CREATE TABLE IF NOT EXISTS events (
                 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -567,6 +567,17 @@ class Database:
         except sqlite3.OperationalError:
             pass
         logger.info("Database migration v10 applied")
+
+    def _migrate_v11(self, conn: sqlite3.Connection) -> None:
+        """
+        Drop idx_measurements_target (target_name, timestamp). Every query that filters by target
+        also filters/sorts by time, which idx_measurements_timestamp covers. Measured 2026-09-24 on
+        a copy of the real DB (4.8 M rows): dashboard queries 0.005–0.016 s → 0.04 s, but the file
+        shrinks by ~256 MB (−24 %) and each insert maintains one index less. The space is returned
+        by the next regular VACUUM.
+        """
+        conn.execute("DROP INDEX IF EXISTS idx_measurements_target")
+        logger.info("Database migration v11 applied")
 
     # ------------------------------------------------------------------
     # Measurements
@@ -1091,18 +1102,28 @@ class Database:
             )
 
     def get_latest_public_ip(self) -> Optional[dict[str, Any]]:
+        """Latest *known* public IP. Rows without any address are failed lookups (e.g. during an
+        outage) that older versions stored – they are not an IP and must not be compared against."""
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM public_ip_history ORDER BY timestamp DESC LIMIT 1"
+                "SELECT * FROM public_ip_history WHERE ipv4 IS NOT NULL OR ipv6 IS NOT NULL "
+                "ORDER BY timestamp DESC LIMIT 1"
             ).fetchone()
         return dict(row) if row else None
 
-    def get_public_ip_history(self, limit: int = 100) -> list[dict[str, Any]]:
+    def get_public_ip_history(
+        self, limit: int = 100, until: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """Newest first. `until` (ISO timestamp) limits to rows up to that point, e.g. a report's end."""
+        sql = "SELECT * FROM public_ip_history"
+        params: list[Any] = []
+        if until:
+            sql += " WHERE timestamp <= ?"
+            params.append(until)
+        sql += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
         with self._lock, self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM public_ip_history ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
@@ -1182,7 +1203,8 @@ class Database:
                 "SELECT * FROM events ORDER BY started_at DESC LIMIT 1"
             ).fetchone()
             latest_ip = conn.execute(
-                "SELECT * FROM public_ip_history ORDER BY timestamp DESC LIMIT 1"
+                "SELECT * FROM public_ip_history WHERE ipv4 IS NOT NULL OR ipv6 IS NOT NULL "
+                "ORDER BY timestamp DESC LIMIT 1"
             ).fetchone()
         return {
             "total_events": total_events,

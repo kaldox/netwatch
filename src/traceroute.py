@@ -71,6 +71,7 @@ def run_traceroute(host: str, timeout: int = 30) -> TracerouteResult:
             output=output.strip(),
             duration_seconds=duration,
             success=result.returncode == 0,
+            error=_exit_error(result),
         )
     except subprocess.TimeoutExpired:
         duration = time.monotonic() - start
@@ -133,6 +134,7 @@ def run_mtr(host: str, count: int = 10, timeout: int = 60) -> TracerouteResult:
             output=output.strip(),
             duration_seconds=duration,
             success=result.returncode == 0,
+            error=_exit_error(result),
         )
     except subprocess.TimeoutExpired:
         duration = time.monotonic() - start
@@ -156,6 +158,14 @@ def run_mtr(host: str, count: int = 10, timeout: int = 60) -> TracerouteResult:
             success=False,
             error=str(exc),
         )
+
+
+def _exit_error(result: subprocess.CompletedProcess) -> Optional[str]:
+    """Readable reason for a non-zero exit (previously the log only said "failed: None")."""
+    if result.returncode == 0:
+        return None
+    lines = [l.strip() for l in (result.stderr or result.stdout or "").splitlines() if l.strip()]
+    return f"exit code {result.returncode}" + (f": {lines[-1][:200]}" if lines else "")
 
 
 def run_diagnostics(

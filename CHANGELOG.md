@@ -12,6 +12,18 @@
 - Optionale Telegram/E-Mail-Benachrichtigungen
 
 ## [Unreleased]
+### Behoben (2026-09-24)
+- **IP-Wechsel falsch gezählt:** Scheiterte die Abfrage der öffentlichen IP (z. B. während eines Ausfalls), wurde „keine IP" als Wechsel gespeichert und die Rückkehr als zweiter. Der Monatsbericht zeigte dadurch ~169 „IP-Wechsel", tatsächlich waren es 15. Gescheiterte Abfragen gelten jetzt als „unbekannt" (letzte bekannte Adresse bleibt), Bericht und Dashboard zählen nur echte Wechsel zwischen bekannten Adressen – auch für bereits gespeicherte Altdaten, die unverändert bleiben. Der Bericht betrachtet jetzt wirklich nur den Berichtsmonat (vorher: die letzten 200 Einträge)
+- **Messlücken durch die IP-Abfrage:** Sie lief synchron in der Messschleife (3 Anbieter × 10 s Timeout) – ein hakender Abfragedienst hielt die Messung bis ~60 s an, ausgerechnet bei Netzproblemen. Läuft jetzt im Hintergrund (Timeout 5 s)
+- `vacuum_interval_days` wurde ignoriert, VACUUM lief täglich (schreibt die ganze ~1-GB-Datei neu und blockiert währenddessen). Jetzt wie konfiguriert, Merker in `database/.last_vacuum`
+- traceroute/mtr: bei Fehlschlag stand im Log nur „failed: None" – jetzt mit Exit-Code und Fehlermeldung
+
+### Geändert (2026-09-24)
+- Telegram: neue Filter `only_closed`, `event_types`, `min_duration_seconds` und eine kurze deutsche Meldung („✅ Internet wieder da – war 5 min 35 s weg · 22:11–22:17 Uhr · Ursache: Leitung/Provider"). Versand im Hintergrund mit Wiederholungen (direkt nach einem Ausfall hakt DNS oft noch). Token/Chat-ID auch aus der Umgebung (`NETWATCH_TELEGRAM_BOT_TOKEN`/`BOT_TOKEN`, `…_CHAT_ID`/`CHAT_ID`)
+- Docker: `NET_ADMIN` entfernt (nicht nötig, NetWatch liest nur die Routing-Tabelle); `mem_limit` und Healthcheck jetzt im Repo statt nur lokal; Hostspezifisches gehört in `docker-compose.override.yml` (git-ignoriert)
+- DB-Migration v11: Index `idx_measurements_target` entfernt – alle Ziel-Abfragen filtern auch nach Zeit, das deckt der Zeit-Index ab. An einer Kopie der echten DB gemessen: Abfragen 0,005–0,016 s → 0,04 s, Datei ~256 MB (−24 %) kleiner (nach dem nächsten VACUUM)
+- Beispielkonfiguration: Speedtest alle 30 statt 15 Minuten (≈ 0,5 statt 1 GB Datenvolumen pro Tag)
+
 ### Behoben
 - Dashboard-Übersicht & Monats-Rollup zählten Ausfälle des **laufenden Tages** nicht: `daily_statistics` wurde nur einmal täglich *für gestern* aggregiert. Heutige Ereignisse (am Monatsersten der ganze Monat) fehlten dadurch in „Ausfälle gesamt", „ISP-Ausfälle (aktueller Monat)", der Verfügbarkeits-Anzeige und im Provider-Nachweis — bis Mitternacht. Der aktuelle Tag wird jetzt bei jedem Wartungs-Tick (~alle 8 min) und beim Start mitberechnet; laufende Ausfälle zählen dabei nur bis „jetzt" statt bis Tagesende als Ausfallzeit
 - Übersicht: Ring-Label „30 Tage" zeigte tatsächlich die Verfügbarkeit des aktuellen Kalendermonats → jetzt „Monat"

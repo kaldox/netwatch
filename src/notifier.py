@@ -8,8 +8,11 @@ from __future__ import annotations
 import logging
 import smtplib
 import ssl
+import threading
+import time
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
@@ -32,14 +35,47 @@ class Notifier:
     # ------------------------------------------------------------------
 
     def notify_event_opened(self, event: NetworkEvent) -> None:
-        subject = self._subject_opened(event)
-        body = self._body_opened(event)
-        self._dispatch(subject, body)
+        self._dispatch(self._subject_opened(event), self._body_opened(event),
+                       telegram_text=self._telegram_text(event) if self._telegram_wants(event, closed=False) else None)
 
     def notify_event_closed(self, event: NetworkEvent) -> None:
-        subject = self._subject_closed(event)
-        body = self._body_closed(event)
-        self._dispatch(subject, body)
+        self._dispatch(self._subject_closed(event), self._body_closed(event),
+                       telegram_text=self._telegram_text(event) if self._telegram_wants(event, closed=True) else None)
+
+    # ------------------------------------------------------------------
+    # Telegram: filter + short message
+    # ------------------------------------------------------------------
+
+    def _telegram_wants(self, event: NetworkEvent, closed: bool) -> bool:
+        """Telegram filter from the config (only_closed / event_types / min_duration_seconds)."""
+        tg = self.cfg.telegram
+        if not tg.enabled:
+            return False
+        if tg.only_closed and not closed:
+            return False
+        if tg.event_types and event.event_type.value not in tg.event_types:
+            return False
+        if closed and (event.duration_seconds or 0) < tg.min_duration_seconds:
+            return False
+        return True
+
+    def _telegram_text(self, event: NetworkEvent) -> str:
+        """Short message in plain German, local times, e.g.
+        "✅ Internet wieder da – war 5 min 35 s weg" / "22:11–22:17 Uhr · Ursache: Leitung/Provider"."""
+        label = _TYPE_LABEL.get(event.event_type, event.event_type.value)
+        outage = event.event_type in _OUTAGE_TYPES
+        start = _local_hhmm(event.started_at)
+        if event.is_open:
+            head = f"{_type_emoji(event.event_type)} " + (f"Internet weg seit {start} Uhr" if outage
+                                                          else f"{label} seit {start} Uhr")
+            return f"{head}\nUrsache: {label}"
+        dur = _dauer(event.duration_seconds or 0)
+        head = f"✅ Internet wieder da – war {dur} weg" if outage else f"✅ {label} vorbei ({dur})"
+        lines = [head, f"{start}–{_local_hhmm(event.ended_at)} Uhr · Ursache: {label}"]
+        before, after = event.public_ipv4_before, event.public_ipv4_after
+        if before and after and before != after:
+            lines.append(f"Neue öffentliche IP: {before} → {after} (Verbindung wurde neu aufgebaut)")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Message construction
@@ -95,32 +131,39 @@ class Notifier:
     # Dispatch
     # ------------------------------------------------------------------
 
-    def _dispatch(self, subject: str, body: str) -> None:
-        if self.cfg.telegram.enabled:
-            self._send_telegram(f"{subject}\n\n{body}")
+    def _dispatch(self, subject: str, body: str, telegram_text: Optional[str] = None) -> None:
+        if telegram_text:
+            # In the background: right after an outage DNS/line often still hiccup, and the
+            # measurement loop must not wait for Telegram.
+            threading.Thread(target=self._send_telegram, args=(telegram_text,), daemon=True,
+                             name="telegram").start()
         if self.cfg.email.enabled:
             self._send_email(subject, body)
 
-    def _send_telegram(self, message: str) -> None:
+    def _send_telegram(self, message: str, attempts: int = 5, pause: float = 20.0) -> bool:
         token = self.cfg.telegram.bot_token
         chat_id = self.cfg.telegram.chat_id
         if not token or not chat_id:
             logger.warning("Telegram config incomplete – skipping")
-            return
+            return False
 
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = urllib.parse.urlencode(
-            {"chat_id": chat_id, "text": message, "parse_mode": ""}
-        ).encode()
-        try:
-            req = urllib.request.Request(url, data=payload, method="POST")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status == 200:
-                    logger.info("Telegram notification sent")
-                else:
+        payload = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
+        for attempt in range(1, attempts + 1):
+            try:
+                req = urllib.request.Request(url, data=payload, method="POST")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status == 200:
+                        logger.info("Telegram notification sent")
+                        return True
                     logger.warning("Telegram returned HTTP %s", resp.status)
-        except Exception as exc:
-            logger.error("Failed to send Telegram notification: %s", exc)
+            except Exception as exc:
+                logger.warning("Telegram attempt %d/%d failed: %s", attempt, attempts,
+                               str(exc).replace(token, "***"))
+            if attempt < attempts:
+                time.sleep(pause)
+        logger.error("Telegram notification not delivered after %d attempts", attempts)
+        return False
 
     def _send_email(self, subject: str, body: str) -> None:
         cfg = self.cfg.email
@@ -150,6 +193,39 @@ class Notifier:
             logger.info("Email notification sent to %s", cfg.to_addr)
         except Exception as exc:
             logger.error("Failed to send email notification: %s", exc)
+
+
+# Plain-language cause for the short Telegram message
+_TYPE_LABEL = {
+    EventType.ISP_FAILURE: "Leitung/Provider",
+    EventType.LOCAL_NETWORK_FAILURE: "Heimnetz (Router/Kabel)",
+    EventType.ROUTING_FAILURE: "Routing beim Provider",
+    EventType.DNS_FAILURE: "Namensauflösung (DNS)",
+    EventType.PACKET_LOSS: "Paketverlust",
+    EventType.LATENCY_DEGRADATION: "hohe Latenz",
+}
+# Event types where "the internet is gone" is the right wording
+_OUTAGE_TYPES = {EventType.ISP_FAILURE, EventType.LOCAL_NETWORK_FAILURE, EventType.ROUTING_FAILURE}
+
+
+def _dauer(seconds: float) -> str:
+    """Readable German duration for the chat: "35 s", "5 min 35 s", "1 h 12 min"."""
+    s = int(round(seconds))
+    if s < 60:
+        return f"{s} s"
+    if s < 3600:
+        return f"{s // 60} min {s % 60} s"
+    return f"{s // 3600} h {(s % 3600) // 60} min"
+
+
+def _local_hhmm(iso: Optional[str]) -> str:
+    """ISO timestamp (UTC in the DB) → local HH:MM (container TZ, e.g. Europe/Zurich)."""
+    if not iso:
+        return "?"
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%H:%M")
+    except ValueError:
+        return iso[11:16]
 
 
 def _type_emoji(event_type: EventType) -> str:

@@ -83,7 +83,9 @@ public_ip:
 
 speedtest:
   enabled: true
-  interval_seconds: 900   # every 15 minutes — real download/upload throughput test
+  # Real download/upload throughput test (~11 MB down + 1 MB up per run, saturates the line for a
+  # few seconds). Every 30 min ≈ 0.5 GB/day; 900 (15 min) gives more samples at ≈ 1 GB/day.
+  interval_seconds: 1800
   timeout_seconds: 30
 
 fritzbox:
@@ -115,7 +117,10 @@ fritzbox:
 database:
   path: "database/netwatch.db"
   wal_mode: true
+  # Full VACUUM (rewrites the whole file, blocks writes meanwhile) every N days; 0 = never.
+  # Old rows are pruned daily regardless – freed pages are reused by new data in between.
   vacuum_interval_days: 7
+  measurement_retention_days: 30   # raw measurements; events and daily statistics are kept
 
 logging:
   level: "INFO"
@@ -135,8 +140,16 @@ reports:
 notifications:
   telegram:
     enabled: false
+    # Leave empty to take them from the environment instead of this file:
+    # NETWATCH_TELEGRAM_BOT_TOKEN / NETWATCH_TELEGRAM_CHAT_ID (or BOT_TOKEN / CHAT_ID, e.g. via
+    # env_file in docker-compose.override.yml).
     bot_token: ""
     chat_id: ""
+    # Recommended: one short message after each real outage, nothing for latency blips.
+    # During an outage nothing can be sent anyway; delivery is retried in the background.
+    only_closed: true
+    event_types: ["ISP_FAILURE", "LOCAL_NETWORK_FAILURE"]   # empty = all types
+    min_duration_seconds: 60
   email:
     enabled: false
     smtp_host: ""

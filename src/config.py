@@ -152,8 +152,12 @@ class ReportsConfig:
 @dataclass
 class TelegramConfig:
     enabled: bool = False
-    bot_token: str = ""
-    chat_id: str = ""
+    bot_token: str = ""   # leer → Umgebungsvariable NETWATCH_TELEGRAM_BOT_TOKEN bzw. BOT_TOKEN
+    chat_id: str = ""     # leer → NETWATCH_TELEGRAM_CHAT_ID bzw. CHAT_ID
+    # Filter, damit Telegram nicht bei jeder kurzen Latenzspitze meldet:
+    only_closed: bool = False          # nur "wieder da"-Meldungen (während eines Ausfalls kommt eh nichts an)
+    event_types: list[str] = field(default_factory=list)   # z. B. ["ISP_FAILURE"]; leer = alle
+    min_duration_seconds: int = 0      # kürzere Ereignisse nicht melden (nur bei Ende-Meldungen prüfbar)
 
 
 @dataclass
@@ -374,8 +378,13 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     notifications = NotificationsConfig(
         telegram=TelegramConfig(
             enabled=tg.get("enabled", False),
-            bot_token=tg.get("bot_token", ""),
-            chat_id=tg.get("chat_id", ""),
+            bot_token=tg.get("bot_token") or os.environ.get("NETWATCH_TELEGRAM_BOT_TOKEN")
+            or os.environ.get("BOT_TOKEN", ""),
+            chat_id=str(tg.get("chat_id") or os.environ.get("NETWATCH_TELEGRAM_CHAT_ID")
+                        or os.environ.get("CHAT_ID", "")),
+            only_closed=bool(tg.get("only_closed", False)),
+            event_types=[str(t).upper() for t in (tg.get("event_types") or [])],
+            min_duration_seconds=int(tg.get("min_duration_seconds", 0)),
         ),
         email=EmailConfig(
             enabled=em.get("enabled", False),
