@@ -2,7 +2,7 @@
 
 [🇩🇪 Deutsch](README.md) · **🇬🇧 English**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+[![CI](https://github.com/kaldox/netwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/kaldox/netwatch/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.11%2B-blue) [![Version](https://img.shields.io/badge/version-1.5.0-informational)](CHANGELOG.md)
 
 **Continuous internet-quality monitoring that pins down *where* your connection problem actually is — your wiring, your line, or your provider.**
 

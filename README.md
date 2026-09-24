@@ -2,7 +2,7 @@
 
 **🇩🇪 Deutsch** · [🇬🇧 English](README.en.md)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+[![CI](https://github.com/kaldox/netwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/kaldox/netwatch/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Python](https://img.shields.io/badge/Python-3.11%2B-blue) [![Version](https://img.shields.io/badge/version-1.5.0-informational)](CHANGELOG.md)
 
 **Durchgehende Überwachung der Internet-Qualität, die festnagelt, *wo* dein Verbindungsproblem wirklich liegt — deine Verkabelung, deine Leitung oder dein Provider.**
 
