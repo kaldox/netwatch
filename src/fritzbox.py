@@ -374,6 +374,8 @@ _RE_DISCONNECT = re.compile(
     re.IGNORECASE,
 )
 _RE_RECONNECT = re.compile(r"Internetverbindung wurde erfolgreich hergestellt", re.IGNORECASE)
+# VPN connections of single devices ("WireGuard-Verbindung … wurde getrennt") say nothing about the line.
+_RE_VPN = re.compile(r"WireGuard|VPN|IPSec", re.IGNORECASE)
 
 
 def _classify_log_entry(msg: str) -> tuple[str, Optional[int], Optional[int], Optional[int]]:
@@ -388,6 +390,9 @@ def _classify_log_entry(msg: str) -> tuple[str, Optional[int], Optional[int], Op
         if cm:
             cost = int(cm.group(1))
         return "cabling_issue", None, None, cost
+
+    if _RE_VPN.search(msg):
+        return "other", None, None, None
 
     if _RE_RECONNECT.search(msg):
         return "reconnect", None, None, None

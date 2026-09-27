@@ -8,6 +8,7 @@ der Version.
 
 | Version | Datum | Das Wichtigste |
 |---|---|---|
+| [1.6.0](#160--2026-09-27) | 2026-09-27 | Provider-Nachweis korrigiert: Router-Belege aus dem Protokoll, nur der Messzeitraum, keine VPN-Meldungen |
 | [1.5.0](#150--2026-09-24) | 2026-09-24 | IP-Wechsel korrekt gezählt, keine Messlücken mehr durch die IP-Abfrage, Telegram-Meldung nach Ausfall, schlankere Datenbank |
 | [1.4.0](#140--2026-09-02) | 2026-09-02 | Export-Button im Dashboard, Fazit auf Seite 1 des Provider-Nachweises, Ausfälle des laufenden Tages werden mitgezählt |
 | [1.3.0](#130--2026-08-15) | 2026-08-15 | DNS-Prüfungen unabhängig vom lokalen Resolver, Ausschluss eigener Ursachen im Nachweis, Docker-Statistik als Zusatzbeleg |
@@ -16,6 +17,36 @@ der Version.
 | [1.0.0](#100--2026-06-22) | 2026-06-22 | Erste Version |
 
 ## [Unreleased]
+
+## [1.6.0] – 2026-09-27
+
+### Behoben
+- **Provider-Nachweis zählte FritzBox-Meldungen ohne Zeitraum.** Das Router-Protokoll wurde ohne
+  Datumsfilter gelesen und bei 500 Einträgen abgeschnitten. „500 Trennungen“ oder „164
+  Verkabelungs-Meldungen“ stammten dadurch aus mehreren Monaten. Jetzt zählt nur der Messzeitraum.
+- **Router-Bestätigung der Ausfälle war falsch.** Sie beruhte auf dem per TR-064 abgefragten
+  WAN-Status, der einem Abriss hinterherhinkt und im entscheidenden Moment noch „Connected“ meldet.
+  Der Bericht wies dadurch z. B. „0 bestätigt“ bzw. „13 von 60“ aus, obwohl das Protokoll 60 von 62
+  Ausfällen sekundengenau belegt („Keine DSL-Synchronisierung“ → „Internetverbindung wurde
+  getrennt“). Bestätigt wird jetzt über das Ereignisprotokoll (±90 s um den Ausfall).
+- VPN-Meldungen einzelner Geräte („WireGuard-Verbindung … wurde getrennt“) zählten als
+  Leitungstrennung – im Bericht und bei der Einordnung neuer Protokolleinträge.
+- Kapitel „Router-Protokoll“ trennt jetzt echte Trennungen („Internetverbindung wurde getrennt“,
+  „Keine DSL-Synchronisierung“) von den Fehlermeldungen der Neueinwahl, statt alles als
+  „Leitungsabrisse pro Tag“ zu summieren.
+- Methodik nannte fest „Durchsatz alle 15 Minuten“ und „direkt am Router“; beides kommt jetzt aus
+  der Konfiguration bzw. ist neutral formuliert („per Netzwerkkabel mit dem Router verbunden“).
+
+### Geändert
+- Das Kapitel zu den Verkabelungs-Hinweisen der FritzBox ist neutral formuliert (die Ursache lässt
+  sich aus der Meldung allein nicht der Hausinstallation zuordnen) und über
+  `reports.provider_show_cabling` abschaltbar; die folgenden Kapitel rücken dann nach.
+- Die spekulative Deutung der SNR-Marge („konservativ konfigurierte Leitung“) ist entfernt.
+- Die Router-CSV im Nachweis enthält nur noch den Messzeitraum und keine VPN-Meldungen.
+
+### Hinzugefügt
+- 7 Tests für den Provider-Nachweis (Zeitraum, VPN, Bestätigungsfenster, Kapitelnummern,
+  kompletter Bericht mit und ohne Verkabelungs-Kapitel).
 
 ## [1.5.0] – 2026-09-24
 
@@ -181,7 +212,8 @@ der Version.
 - systemd-Dienst mit `install.sh`
 - Optionale Benachrichtigung per Telegram oder E-Mail
 
-[Unreleased]: https://github.com/kaldox/netwatch/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/kaldox/netwatch/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/kaldox/netwatch/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/kaldox/netwatch/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/kaldox/netwatch/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/kaldox/netwatch/compare/v1.2.0...v1.3.0

@@ -5,7 +5,8 @@ Generates a provider-ready evidence package: a PDF report plus CSV raw-data
 attachments. The report separates three layers of responsibility so the
 conclusion is defensible and can't be turned back on the customer:
 
-    1. House wiring   — what the FritzBox flags as in-home cabling defects.
+    1. House wiring   — the FritzBox's cabling hints (optional chapter,
+                        reports.provider_show_cabling).
     2. DSL line       — the physical line capacity the provider delivers.
     3. Provider net   — measured throughput / availability vs. the line.
 
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -116,6 +118,64 @@ def _local(ts: str):
         return None
 
 
+# Router log (FritzBox). Only messages about the line itself count as evidence: VPN messages
+# (WireGuard/IPSec) are about single devices tunnelling in and must not be read as line drops.
+_RE_VPN = re.compile(r"WireGuard|VPN|IPSec", re.IGNORECASE)
+_RE_LINE_LOST = re.compile(r"Keine DSL-Synchronisierung|DSL antwortet nicht", re.IGNORECASE)
+_RE_DISCONNECTED = re.compile(r"Internetverbindung wurde getrennt", re.IGNORECASE)
+# How far around an outage a router message may lie to count as belonging to it.
+_CONFIRM_WINDOW = timedelta(seconds=90)
+
+
+def _log_time(entry: dict[str, Any]) -> Optional[datetime]:
+    """Router log timestamps are stored as naive local time (as the FritzBox prints them)."""
+    try:
+        return datetime.fromisoformat(entry.get("event_timestamp") or "")
+    except ValueError:
+        return None
+
+
+def _router_log(db: Database, start_local: datetime, end_local: datetime) -> dict[str, list]:
+    """Router log of the report period, grouped by what the messages mean for the line.
+    `start_local`/`end_local` are naive local times, like the stored log timestamps."""
+    rows = [r for r in db.get_fritzbox_log(start=start_local.isoformat(timespec="seconds"),
+                                            end=end_local.isoformat(timespec="seconds"), limit=100000)
+            if not _RE_VPN.search(r.get("message") or "")]
+
+    def msg(r):
+        return r.get("message") or ""
+    return {
+        "rows": rows,
+        "line_lost": [r for r in rows if _RE_LINE_LOST.search(msg(r))],
+        "disconnected": [r for r in rows if _RE_DISCONNECTED.search(msg(r))],
+        "login_errors": [r for r in rows if r.get("category") == "disconnect"
+                         and not _RE_DISCONNECTED.search(msg(r))],
+        "reconnects": [r for r in rows if r.get("category") == "reconnect"],
+        "cabling": [r for r in rows if r.get("category") == "cabling_issue"],
+        "sync_changes": [r for r in rows if r.get("category") == "sync_change"],
+    }
+
+
+def _router_confirmation(event: dict[str, Any], log: dict[str, list]) -> Optional[dict[str, datetime]]:
+    """Router messages that document an outage: DSL sync lost and/or internet connection dropped,
+    within `_CONFIRM_WINDOW` of the outage. The router log is the reliable source here — the WAN
+    state polled via TR-064 lags behind a drop and still reads "Connected" at that moment."""
+    beg = _local(event.get("started_at", ""))
+    end = _local(event.get("ended_at") or event.get("started_at", ""))
+    if beg is None or end is None:
+        return None
+    lo = beg.replace(tzinfo=None) - _CONFIRM_WINDOW
+    hi = end.replace(tzinfo=None) + _CONFIRM_WINDOW
+
+    def first(rows):
+        hits = [t for t in (_log_time(r) for r in rows) if t and lo <= t <= hi]
+        return min(hits) if hits else None
+    lost, disc = first(log["line_lost"]), first(log["disconnected"])
+    if lost is None and disc is None:
+        return None
+    return {"line_lost": lost, "disconnected": disc}
+
+
 _CELL_HEAD = ParagraphStyle("cellHead", fontSize=8.5, leading=10.5,
                             textColor=colors.white, fontName="Helvetica-Bold")
 _CELL_BODY = ParagraphStyle("cellBody", fontSize=8.5, leading=10.5,
@@ -190,12 +250,15 @@ def _analyse(db: Database, cfg: AppConfig, days: int) -> dict[str, Any]:
     sync_downs = [f["downstream_sync_mbps"] for f in fb_samples
                   if f.get("downstream_sync_mbps") is not None]
 
-    cabling = db.get_fritzbox_log(category="cabling_issue", limit=500)
-    disconnects = db.get_fritzbox_log(category="disconnect", limit=500)
-    sync_changes = db.get_fritzbox_log(category="sync_change", limit=500)
+    # Router log of exactly the report period (it used to be read without a date filter and
+    # capped at 500 rows, which mixed in older months and inflated every count).
+    log_start = (now - timedelta(days=days)).astimezone().replace(tzinfo=None)
+    log_end = now.astimezone().replace(tzinfo=None)
+    rlog = _router_log(db, log_start, log_end)
 
     events = db.get_events(start=start, end=end, limit=5000)
     isp_events = [e for e in events if e.get("event_type") == "ISP_FAILURE"]
+    isp_confirmations = [_router_confirmation(e, rlog) for e in isp_events]
     local_events = [e for e in events if e.get("event_type") == "LOCAL_NETWORK_FAILURE"]
     dns_events = [e for e in events if e.get("event_type") == "DNS_FAILURE"]
 
@@ -241,8 +304,13 @@ def _analyse(db: Database, cfg: AppConfig, days: int) -> dict[str, Any]:
         "up_max": max(ups) if ups else None,
         "fb_latest": fb_latest,
         "sync_down_avg": avg(sync_downs),
-        "cabling": cabling, "disconnects": disconnects, "sync_changes": sync_changes,
-        "isp_events": isp_events, "local_events": local_events, "dns_events": dns_events,
+        "router_log": rlog, "log_start": log_start, "log_end": log_end,
+        "cabling": rlog["cabling"], "disconnects": rlog["disconnected"],
+        "sync_changes": rlog["sync_changes"], "line_lost": rlog["line_lost"],
+        "login_errors": rlog["login_errors"], "reconnects": rlog["reconnects"],
+        "isp_events": isp_events, "isp_confirmations": isp_confirmations,
+        "line_drops": sum(1 for c in isp_confirmations if c),
+        "local_events": local_events, "dns_events": dns_events,
         "local_dns_stats": local_dns_stats, "interfaces_seen": interfaces_seen,
         "total_downtime": total_downtime, "total_outages": total_outages,
         "isp_outage_days": isp_outage_days, "longest_outage": longest_outage,
@@ -310,8 +378,21 @@ def _evaluate_contract(a: dict[str, Any], contract_max: float,
 # Executive summary ("Fazit")
 # ---------------------------------------------------------------------------
 
+def _chapters(show_cabling: bool) -> dict[str, int]:
+    """Chapter numbers; the cabling chapter is optional, the ones after it move up."""
+    n = {"speed": 1, "avail": 2, "router": 3}
+    nxt = 4
+    if show_cabling:
+        n["cabling"] = nxt
+        nxt += 1
+    for key in ("line", "net", "stab", "method"):
+        n[key] = nxt
+        nxt += 1
+    return n
+
+
 def _summarise(db: Database, cfg: AppConfig, a: dict[str, Any],
-               contract_eval: dict[str, Any]) -> dict[str, Any]:
+               contract_eval: dict[str, Any], ch: dict[str, int]) -> dict[str, Any]:
     """Condense the whole analysis into one headline verdict plus the concrete
     findings that justify it. Rendered at the very top of the report so a
     reader who only skims the first page still gets the bottom line."""
@@ -319,17 +400,9 @@ def _summarise(db: Database, cfg: AppConfig, a: dict[str, Any],
     fb = a["fb_latest"]
     dsl_max = fb.get("dsl_down_max_mbps")
 
-    # ISP outages the FritzBox's own WAN state confirms as a line drop
+    # ISP outages the router log documents as a lost DSL sync / dropped connection
     # (same criterion as chapter 2's detail table).
-    line_drops = 0
-    for e in a["isp_events"]:
-        fbs = db.get_fritzbox_status(event_id=e.get("event_id"), limit=1)
-        if not fbs:
-            continue
-        conn = fbs[0].get("connection_status")
-        ut = fbs[0].get("wan_uptime_seconds")
-        if (conn and conn != "Connected") or (ut is not None and ut < 300):
-            line_drops += 1
+    line_drops = a["line_drops"]
 
     throttle_pct = None
     if a["down_avg"] is not None and a["sync_down_avg"]:
@@ -346,26 +419,27 @@ def _summarise(db: Database, cfg: AppConfig, a: dict[str, Any],
         violated = [name for name, _req, _res, ok in contract_eval["criteria"] if not ok]
         findings.append(
             "Geschwindigkeits-Richtwerte nicht erreicht: " + ", ".join(violated)
-            + " (Details in Kapitel 1)."
+            + f" (Details in Kapitel {ch['speed']})."
         )
     if dsl_cant_meet:
         severity = "red"
         findings.append(
             f"Die Leitung erreicht physikalisch maximal {dsl_max:.1f} Mbit/s und kann den "
-            f"vertraglichen Maximalwert ({c_max:.0f} Mbit/s) nicht erfüllen (Kapitel 5)."
+            f"vertraglichen Maximalwert ({c_max:.0f} Mbit/s) nicht erfüllen (Kapitel {ch['line']})."
         )
     if line_drops:
         severity = "red"
         findings.append(
-            f"{line_drops} von {len(a['isp_events'])} Anbieter-Ausfällen sind durch das "
-            f"Ereignisprotokoll der FritzBox als Leitungsabriss bestätigt (Kapitel 2/3)."
+            f"{line_drops} von {len(a['isp_events'])} Anbieter-Ausfällen dokumentiert das "
+            f"Ereignisprotokoll der FritzBox selbst als Verlust der DSL-Synchronisation bzw. "
+            f"Trennung der Internetverbindung (Kapitel {ch['avail']}/{ch['router']})."
         )
     if throttle_pct is not None and throttle_pct < 50:
         severity = "red"
         findings.append(
             f"Vom synchronisierten Leitungsdurchsatz kommen im Schnitt nur "
             f"{throttle_pct:.0f}% an ({a['down_avg']:.1f} von {a['sync_down_avg']:.1f} "
-            f"Mbit/s) — Drosselung im Providernetz wahrscheinlich (Kapitel 6)."
+            f"Mbit/s) — Drosselung im Providernetz wahrscheinlich (Kapitel {ch['net']})."
         )
 
     # Softer signals: lift to orange only if nothing above already made it red.
@@ -374,27 +448,27 @@ def _summarise(db: Database, cfg: AppConfig, a: dict[str, Any],
             severity = "orange"
             findings.append(
                 f"{len(a['isp_events'])} Anbieter-Ausfall/-Ausfälle dokumentiert, "
-                f"Gesamt-Ausfallzeit {format_duration(a['total_downtime'])} (Kapitel 2)."
+                f"Gesamt-Ausfallzeit {format_duration(a['total_downtime'])} (Kapitel {ch['avail']})."
             )
         if a["disconnects"] or a["sync_changes"]:
             severity = "orange"
             findings.append(
-                f"{len(a['disconnects'])} Zwangstrennungen und {len(a['sync_changes'])} "
-                f"Neusynchronisierungen im Router-Protokoll — Hinweis auf eine instabile "
-                f"Anbieter-Leitung (Kapitel 3/7)."
+                f"{len(a['disconnects'])} Trennungen der Internetverbindung und "
+                f"{len(a['sync_changes'])} DSL-Neusynchronisierungen im Router-Protokoll — Hinweis "
+                f"auf eine instabile Anbieter-Leitung (Kapitel {ch['router']}/{ch['stab']})."
             )
         if throttle_pct is not None and throttle_pct < 80:
             severity = "orange"
             findings.append(
                 f"Die Leitung wird im Schnitt nur zu {throttle_pct:.0f}% ausgenutzt "
                 f"({a['down_avg']:.1f} von {a['sync_down_avg']:.1f} Mbit/s) — beobachten "
-                f"(Kapitel 6)."
+                f"(Kapitel {ch['net']})."
             )
         if a["avg_avail"] is not None and a["avg_avail"] < 99.9:
             severity = "orange"
             findings.append(
                 f"Durchschnittliche Verfügbarkeit {a['avg_avail']:.3f}% liegt unter 99,9% "
-                f"(Kapitel 2)."
+                f"(Kapitel {ch['avail']})."
             )
 
     if not findings:
@@ -438,6 +512,8 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
 
     # Evaluated once up front so the executive summary and chapter 1 agree.
     contract_eval = _evaluate_contract(a, c_max, c_norm, c_min)
+    show_cabling = cfg.reports.provider_show_cabling
+    ch = _chapters(show_cabling)
 
     pdf_path = output_dir / f"netwatch_providernachweis_{ts}.pdf"
     doc = SimpleDocTemplate(
@@ -453,11 +529,11 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     story.append(Paragraph(
         f"Erstellt am {a['now'].astimezone().strftime('%d.%m.%Y um %H:%M')} Uhr · "
         f"Messzeitraum {period_from} – {period_to} ({days} Tage) · "
-        f"Messsystem: NetWatch (Raspberry Pi, LAN-Kabel an Router)",
+        f"Messsystem: NetWatch (Raspberry Pi, per Netzwerkkabel mit dem Router verbunden)",
         styles["NWSub"]))
 
     # ---- Fazit (executive summary — deliberately the first thing on the page) ----
-    summary = _summarise(db, cfg, a, contract_eval)
+    summary = _summarise(db, cfg, a, contract_eval, ch)
     story.append(Paragraph("Fazit", styles["NWFazit"]))
     _sev_color = {"red": RED, "orange": ORANGE, "green": GREEN}[summary["severity"]]
     _bullets = "<br/>".join("•&nbsp;" + f for f in summary["findings"])
@@ -481,8 +557,8 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
          f"{a['avg_avail']:.3f}%" if a["avg_avail"] is not None else "–"],
         ["Gesamt-Ausfallzeit", format_duration(a["total_downtime"])],
         ["Anbieter-Ausfälle (ISP)",
-         f"{len(a['isp_events'])} (davon {summary['line_drops']} per Router bestätigt)"],
-        ["Zwangstrennungen / Resyncs (Router)",
+         f"{len(a['isp_events'])} (davon {summary['line_drops']} im Router-Protokoll belegt)"],
+        ["Trennungen / DSL-Neusynchronisierungen (Router)",
          f"{len(a['disconnects'])} / {len(a['sync_changes'])}"],
     ]
     if contract_eval.get("has_data") and contract_eval.get("criteria"):
@@ -494,16 +570,20 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
                         "keine Werte hinterlegt — Vergleich übersprungen"])
     story.append(_table(kb_rows, col_widths=[5.6 * cm, 9.2 * cm]))
     story.append(Spacer(1, 8))
+    _toc = [(ch["speed"], "Geschwindigkeit &amp; Vertragswerte"), (ch["avail"], "Verfügbarkeit &amp; Ausfälle"),
+            (ch["router"], "Router-Protokoll")]
+    if show_cabling:
+        _toc.append((ch["cabling"], "Verkabelungs-Hinweise"))
+    _toc += [(ch["line"], "DSL-Leitung"), (ch["net"], "Anbieternetz"), (ch["stab"], "Leitungsstabilität"),
+             (ch["method"], "Methodik &amp; Absicherung")]
     story.append(Paragraph(
-        "<b>Aufbau:</b> 1 Geschwindigkeit &amp; Vertragswerte · 2 Verfügbarkeit &amp; "
-        "Ausfälle · 3 Zwangstrennungen · 4 Hausverkabelung · 5 DSL-Leitung · "
-        "6 Anbieternetz · 7 Leitungsstabilität · 8 Methodik &amp; Absicherung. "
-        "Alle Rohdaten liegen als CSV-Dateien bei.", styles["NWSmall"]))
+        "<b>Aufbau:</b> " + " · ".join(f"{n} {t}" for n, t in _toc)
+        + ". Alle Rohdaten liegen als CSV-Dateien bei.", styles["NWSmall"]))
 
     # ===================================================================
     # 1. Speed vs. contract values
     # ===================================================================
-    story += _h2("1. Geschwindigkeit &amp; Vertragswerte (Download)", styles)
+    story += _h2(f"{ch['speed']}. Geschwindigkeit &amp; Vertragswerte (Download)", styles)
     if not c_max and not c_norm and not c_min:
         story.append(Paragraph(
             "Es sind keine Vertragswerte hinterlegt. In der Konfiguration lassen sich die "
@@ -566,7 +646,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     # ===================================================================
     # 2. Availability / outages
     # ===================================================================
-    story += _h2("2. Verfügbarkeit &amp; Ausfälle", styles)
+    story += _h2(f"{ch['avail']}. Verfügbarkeit &amp; Ausfälle", styles)
     av_rows = [["Kennwert", "Wert"]]
     if a["avg_avail"] is not None:
         av_rows.append(["Verfügbarkeit (Schnitt)", f"{a['avg_avail']:.3f}%"])
@@ -577,34 +657,35 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     story.append(_table(av_rows, col_widths=[7.4*cm, 7.4*cm]))
     if a["isp_events"]:
         story.append(Spacer(1, 6))
+        n_isp = len(a["isp_events"])
+        shown = min(n_isp, 14)
         story.append(Paragraph(
-            "Dokumentierte Anbieter-Ausfälle, jeweils mit dem Zustand, den die FritzBox im "
-            "selben Moment meldete (unabhängige Bestätigung durch das Anbieter-Gerät):",
+            f"Dokumentierte Anbieter-Ausfälle ({'die letzten ' + str(shown) + ' von ' + str(n_isp) if n_isp > shown else 'alle'}; "
+            f"vollständige Liste in der Ausfall-CSV), jeweils mit dem, was das Ereignisprotokoll der "
+            f"FritzBox im selben Zeitfenster (±{int(_CONFIRM_WINDOW.total_seconds())} s) festhält:",
             styles["NWBody"]))
-        out_rows = [["Beginn (lokal)", "Dauer", "FritzBox-WAN", "WAN-Uptime", "Bewertung"]]
-        line_drop_count = 0
-        for e in a["isp_events"][:14]:
+        out_rows = [["Beginn (lokal)", "Dauer", "Router-Protokoll", "Bewertung"]]
+        for e, conf in list(zip(a["isp_events"], a["isp_confirmations"]))[:14]:
             dt = _local(e.get("started_at", ""))
             beg = dt.strftime("%d.%m. %H:%M:%S") if dt else e.get("started_at", "–")
             dur = format_duration(e.get("duration_seconds") or 0) if e.get("ended_at") else "laufend"
-            conn = "–"; up = "–"; verdict = "Providernetz (Leitung lief)"
-            fbs = db.get_fritzbox_status(event_id=e.get("event_id"), limit=1)
-            if fbs:
-                f = fbs[0]
-                conn = f.get("connection_status") or "–"
-                ut = f.get("wan_uptime_seconds")
-                up = format_duration(ut) if ut is not None else "–"
-                if (conn and conn != "Connected") or (ut is not None and ut < 300):
-                    verdict = "Leitungsabriss bestätigt"
-                    line_drop_count += 1
-            out_rows.append([beg, dur, conn, up, verdict])
-        story.append(_table(out_rows, col_widths=[3.0*cm, 1.6*cm, 3.0*cm, 2.6*cm, 4.6*cm]))
+            if conf:
+                parts = []
+                if conf["line_lost"]:
+                    parts.append(f"DSL-Sync verloren {conf['line_lost']:%H:%M:%S}")
+                if conf["disconnected"]:
+                    parts.append(f"getrennt {conf['disconnected']:%H:%M:%S}")
+                router, verdict = " · ".join(parts), "Leitungsabriss (Router)"
+            else:
+                router, verdict = "keine Meldung", "Providernetz"
+            out_rows.append([beg, dur, router, verdict])
+        story.append(_table(out_rows, col_widths=[3.0*cm, 1.8*cm, 6.2*cm, 3.8*cm]))
         story.append(Paragraph(
-            f"Bei <b>{line_drop_count}</b> der angezeigten Ausfälle war die Leitung laut FritzBox "
-            f"im selben Moment getrennt bzw. gerade neu verbunden (WAN-Uptime zurückgesetzt) — "
-            f"hier ist der Leitungsabriss durch das Anbieter-Gerät selbst belegt. Bei den übrigen "
-            f"blieb die FritzBox verbunden, während die externen Ziele unerreichbar waren: eine "
-            f"Störung im Providernetz oberhalb des Anschlusses.",
+            f"Bei <b>{a['line_drops']} von {n_isp}</b> Anbieter-Ausfällen im Messzeitraum protokolliert "
+            f"die FritzBox selbst im selben Zeitfenster den Verlust der DSL-Synchronisation bzw. die "
+            f"Trennung der Internetverbindung — der Leitungsabriss ist damit durch das Anbieter-Gerät "
+            f"belegt. Bei den übrigen enthält das Router-Protokoll keine solche Meldung: externe Ziele "
+            f"waren nicht erreichbar, während der Router im Heimnetz erreichbar blieb.",
             styles["NWSmall"]))
     story.append(Paragraph(
         "Hinweis: NetWatch zeichnet auch während eines Ausfalls lokal weiter auf — "
@@ -615,70 +696,70 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     # ===================================================================
     # 3. Router disconnect log — independent evidence from the router
     # ===================================================================
-    story += _h2("3. Zwangstrennungen laut Router-Protokoll", styles)
-    reconnects = db.get_fritzbox_log(category="reconnect", limit=1000)
-    n_disc = len(a["disconnects"]); n_recon = len(reconnects)
-    if a["disconnects"] or reconnects:
+    story += _h2(f"{ch['router']}. Verbindungstrennungen laut Router-Protokoll", styles)
+    n_disc, n_lost = len(a["disconnects"]), len(a["line_lost"])
+    n_login, n_recon = len(a["login_errors"]), len(a["reconnects"])
+    if n_disc or n_lost:
         story.append(Paragraph(
-            f"Die vom Messgerät unabhängige Beweisquelle ist das Ereignisprotokoll der "
-            f"FritzBox selbst: Der Router dokumentiert jede Zwangstrennung mit Zeitstempel — "
-            f"unabhängig davon, welches Gerät im Heimnetz misst, welcher DNS genutzt wird oder ob "
-            f"gerade gesurft wird. Im Zeitraum protokolliert die FritzBox <b>{n_recon} "
-            f"Neuverbindungen</b> und <b>{n_disc} Fehler-/Trennungsmeldungen</b> "
-            f"(PPPoE-/LCP-/PPP-Timeouts) — rund <b>{n_recon / max(1, a['days']):.1f} "
-            f"Leitungsabrisse pro Tag</b>.",
+            f"Die vom Messgerät unabhängige Beweisquelle ist das Ereignisprotokoll der FritzBox selbst: "
+            f"Der Router dokumentiert jede Trennung mit Zeitstempel — unabhängig davon, welches Gerät im "
+            f"Heimnetz misst, welcher DNS genutzt wird oder ob gerade gesurft wird. Im Messzeitraum "
+            f"protokolliert die FritzBox <b>{n_disc}-mal „Internetverbindung wurde getrennt“</b> "
+            f"(rund {n_disc / max(1, a['days']):.1f} pro Tag) und <b>{n_lost}-mal „Keine "
+            f"DSL-Synchronisierung“</b>. Bei der anschließenden Neueinwahl kamen {n_login} Fehlermeldungen "
+            f"(PPPoE-/LCP-Zeitüberschreitungen, gescheiterte Anmeldung) hinzu, {n_recon} Neueinwahlen "
+            f"gelangen. VPN-Meldungen einzelner Geräte (z. B. WireGuard) sind nicht mitgezählt.",
             styles["NWBody"]))
+        key_rows = sorted(a["line_lost"] + a["disconnects"],
+                          key=lambda r: r.get("event_timestamp") or "", reverse=True)[:14]
         dl_rows = [["Datum", "Uhrzeit", "Router-Meldung (wörtlich)"]]
-        for e in a["disconnects"][:14]:
+        for e in key_rows:
             msg = (e.get("message", "") or "")
             dl_rows.append([e.get("raw_date", "–"), e.get("raw_time", "–"),
                             (msg[:72] + "…") if len(msg) > 72 else msg])
         story.append(Spacer(1, 4))
         story.append(_table(dl_rows, col_widths=[2*cm, 1.8*cm, 11*cm]))
         story.append(Paragraph(
-            "Diese Meldungen stammen wörtlich aus dem Anbieter-Gerät und sind der Kern des "
-            "Nachweises: Die Leitung trennt sich regelmäßig zwangsweise — außerhalb des "
-            "Einflusses des Heimnetzes und unabhängig von jeder Messung durch den Pi.",
-            styles["NWSmall"]))
+            "Die jüngsten Meldungen wörtlich aus dem Router; das vollständige Protokoll des "
+            "Messzeitraums liegt als CSV bei.", styles["NWSmall"]))
     else:
         story.append(Paragraph(
-            "Im Messzeitraum wurden keine Zwangstrennungen im FritzBox-Protokoll erfasst.",
+            "Im Messzeitraum hat die FritzBox keine Trennung der Internetverbindung protokolliert.",
             styles["NWBody"]))
 
     # ===================================================================
     # 4. Layer 1: house wiring (own side)
     # ===================================================================
-    story += _h2("4. Hausverkabelung (eigene Seite)", styles)
-    if a["cabling"]:
-        latest = a["cabling"][0]
-        cost = latest.get("cabling_cost_kbps")
-        cost_txt = (f" Geschätzter Verlust durch die Verkabelung: rund {cost/1000:.1f} Mbit/s."
-                    if cost else "")
-        story.append(Paragraph(
-            f"Die FritzBox meldet eine Beeinträchtigung durch die Verkabelung im Haus.{cost_txt} "
-            f"Insgesamt {len(a['cabling'])} solcher Meldungen im Zeitraum. Dieser Anteil ist der "
-            f"eigenen Installation zuzurechnen und wird offen ausgewiesen, damit der verbleibende "
-            f"Nachweis sauber dem Anbieter zugeordnet werden kann.",
-            styles["NWBody"]))
-        cab_rows = [["Datum", "Uhrzeit", "Geschätzter Verlust", "Meldung"]]
-        for c in a["cabling"][:8]:
-            ck = c.get("cabling_cost_kbps")
-            msg = c.get("message", "")
-            cab_rows.append([c.get("raw_date", "–"), c.get("raw_time", "–"),
-                             f"{ck/1000:.1f} Mbit/s" if ck else "–",
-                             (msg[:55] + "…") if len(msg) > 55 else msg])
-        story.append(Spacer(1, 4))
-        story.append(_table(cab_rows, col_widths=[2*cm, 1.8*cm, 3*cm, 8*cm]))
-    else:
-        story.append(Paragraph(
-            "Keine Verkabelungs-Warnungen der FritzBox im Messzeitraum. Die in-house-"
-            "Verkabelung wird vom Router nicht beanstandet.",
-            styles["NWBody"]))
+    if show_cabling:
+        story += _h2(f"{ch['cabling']}. Verkabelungs-Hinweise des Routers", styles)
+        if a["cabling"]:
+            latest = a["cabling"][0]
+            cost = latest.get("cabling_cost_kbps")
+            cost_txt = (f" Der Router schätzt den Verlust auf rund {cost/1000:.1f} Mbit/s."
+                        if cost else "")
+            story.append(Paragraph(
+                f"Die FritzBox meldete im Messzeitraum {len(a['cabling'])}-mal eine Beeinträchtigung des "
+                f"Signals durch die Verkabelung.{cost_txt} Wo die Ursache liegt (Hausinstallation oder "
+                f"Anschlussbereich), lässt sich aus der Meldung allein nicht bestimmen; sie wird der "
+                f"Vollständigkeit halber ausgewiesen.",
+                styles["NWBody"]))
+            cab_rows = [["Datum", "Uhrzeit", "Geschätzter Verlust", "Meldung"]]
+            for c in a["cabling"][:8]:
+                ck = c.get("cabling_cost_kbps")
+                msg = c.get("message", "")
+                cab_rows.append([c.get("raw_date", "–"), c.get("raw_time", "–"),
+                                 f"{ck/1000:.1f} Mbit/s" if ck else "–",
+                                 (msg[:55] + "…") if len(msg) > 55 else msg])
+            story.append(Spacer(1, 4))
+            story.append(_table(cab_rows, col_widths=[2*cm, 1.8*cm, 3*cm, 8*cm]))
+        else:
+            story.append(Paragraph(
+                "Keine Verkabelungs-Hinweise der FritzBox im Messzeitraum.", styles["NWBody"]))
 
     # ===================================================================
     # 5. Layer 2: DSL line (provider's line)
     # ===================================================================
-    story += _h2("5. DSL-Leitung (Anbieter-Leitung)", styles)
+    story += _h2(f"{ch['line']}. DSL-Leitung (Anbieter-Leitung)", styles)
     line_rows = [["Kennwert", "Wert", "Bewertung"]]
     if c_max:
         line_rows.append(["Vertrag Maximum (Down)", f"{c_max:.1f} Mbit/s", "Sollwert"])
@@ -691,8 +772,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
         line_rows.append(["Phys. Maximum (Down)", f"{dsl_max:.1f} Mbit/s", b])
     if fb.get("dsl_down_snr_db") is not None:
         snr = fb["dsl_down_snr_db"]
-        line_rows.append(["SNR-Marge (Down)", f"{snr:.1f} dB",
-                          "auffällig hoch" if snr > 12 else "normal"])
+        line_rows.append(["SNR-Marge (Down)", f"{snr:.1f} dB", "–"])
     if fb.get("dsl_down_attenuation_db") is not None:
         line_rows.append(["Dämpfung (Down)", f"{fb['dsl_down_attenuation_db']:.1f} dB", "–"])
     story.append(_table(line_rows, col_widths=[5*cm, 4*cm, 5.8*cm]))
@@ -702,17 +782,11 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             f"<b>Befund:</b> Die Leitung erreicht physikalisch maximal {dsl_max:.1f} Mbit/s "
             f"und kann die vertraglichen {c_max:.0f} Mbit/s damit nicht erfüllen.",
             styles["NWBody"]))
-    if fb.get("dsl_down_snr_db") and fb["dsl_down_snr_db"] > 12:
-        story.append(Paragraph(
-            f"<b>Hinweis:</b> Die SNR-Marge von {fb['dsl_down_snr_db']:.1f} dB liegt deutlich "
-            f"über dem üblichen Wert (~6 dB) — Indiz für eine anbieterseitig konservativ "
-            f"konfigurierte Leitung, die höher synchronisieren könnte.",
-            styles["NWBody"]))
 
     # ===================================================================
     # 6. Layer 3: provider network
     # ===================================================================
-    story += _h2("6. Anbieternetz (Durchsatz &amp; Abbrüche)", styles)
+    story += _h2(f"{ch['net']}. Anbieternetz (Durchsatz &amp; Abbrüche)", styles)
     if a["down_avg"] is not None and a["sync_down_avg"]:
         util = a["down_avg"] / a["sync_down_avg"] * 100
         story.append(Paragraph(
@@ -721,14 +795,14 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             styles["NWBody"]))
     if a["disconnects"]:
         story.append(Paragraph(
-            f"Verbindungsabbrüche laut FritzBox-Protokoll: {len(a['disconnects'])} "
-            f"(PPPoE-/LCP-Fehler) — außerhalb des Einflusses des Heimnetzes.",
+            f"Trennungen der Internetverbindung laut FritzBox-Protokoll: {len(a['disconnects'])} "
+            f"(Kapitel {ch['router']}).",
             styles["NWBody"]))
 
     # ===================================================================
     # 7. Line stability / sync changes
     # ===================================================================
-    story += _h2("7. Leitungsstabilität (Sync-Wechsel)", styles)
+    story += _h2(f"{ch['stab']}. Leitungsstabilität (Sync-Wechsel)", styles)
     syncs = a["sync_changes"]
     if syncs:
         per_day = len(syncs) / max(1, a["days"])
@@ -767,15 +841,16 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     # 8. Methodology & safeguards  (how it was measured, why other causes
     #    are ruled out) — kept at the end so the findings come first.
     # ===================================================================
-    story += _h2("8. Methodik &amp; Absicherung", styles)
+    story += _h2(f"{ch['method']}. Methodik &amp; Absicherung", styles)
 
     story.append(Paragraph("Wie gemessen wird", styles["NWH3"]))
     _method_points = [
-        "Erreichbarkeit, Latenz, Jitter und Paketverlust alle 5 Sekunden; realer "
-        "Durchsatz (Down-/Upload gegen Cloudflare) alle 15 Minuten.",
+        f"Erreichbarkeit, Latenz, Jitter und Paketverlust alle {cfg.monitoring.interval_seconds} Sekunden; "
+        f"realer Durchsatz (Down-/Upload gegen Cloudflare) alle "
+        f"{max(1, round(cfg.speedtest.interval_seconds / 60))} Minuten.",
         f"Im Messzeitraum liegen <b>{a['speedtest_count']} erfolgreiche "
         f"Durchsatzmessungen</b> an <b>{len(a['measurement_days'])} Messtagen</b> vor.",
-        "Alle Messungen kabelgebunden direkt am Router. CPU, RAM, Temperatur und "
+        "Alle Messungen kabelgebunden (Netzwerkkabel zum Router, kein WLAN). CPU, RAM, Temperatur und "
         "Messzyklusdauer des Messgeräts werden je Messung miterfasst, um eine "
         "Verfälschung durch Überlastung auszuschließen.",
         "Die Leitungswerte stammen unmittelbar aus dem Router (TR-064). Alle Rohdaten "
@@ -791,8 +866,8 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
         "betriebener DNS-Server (z. B. AdGuard, Pi-hole) kann sie daher weder auslösen noch "
         "verfälschen. Die ergänzenden DNS-Checks fragen ebenfalls feste, unabhängige "
         "Nameserver direkt per IP ab, nicht den auf dem Messgerät konfigurierten Resolver. "
-        "Jeder Ausfall wird zusätzlich mit dem WAN-Status der FritzBox im selben Moment "
-        "abgeglichen. Reine Durchsatz- und Latenzwerte können durch gleichzeitige "
+        "Jeder Ausfall wird zusätzlich mit dem Ereignisprotokoll der FritzBox im selben "
+        "Zeitfenster abgeglichen. Reine Durchsatz- und Latenzwerte können durch gleichzeitige "
         "Eigennutzung im Haushalt beeinflusst sein und gelten hier nur als ergänzender "
         "Beleg.",
         styles["NWSmall"]))
@@ -805,7 +880,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     excl_rows.append([
         "Fehler im Heimnetz (Kabel, Switch, Router-LAN)",
         "Gateway-Erreichbarkeit wird pro Zyklus separat geprüft; Ausfälle laufen als "
-        "LOCAL_NETWORK_FAILURE und zählen nicht als Anbieter-Ausfall (Kapitel 2).",
+        f"LOCAL_NETWORK_FAILURE und zählen nicht als Anbieter-Ausfall (Kapitel {ch['avail']}).",
     ])
     excl_rows.append([
         "Lokaler DNS-Server (z. B. AdGuard, Pi-hole)",
@@ -838,14 +913,14 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
             )
     else:
         wlan_note = (
-            "Messgerät ist als Betriebsvoraussetzung kabelgebunden direkt am Router "
-            "angeschlossen (siehe Kopfzeile dieses Berichts)."
+            "Messgerät ist als Betriebsvoraussetzung per Netzwerkkabel mit dem Router "
+            "verbunden (siehe Kopfzeile dieses Berichts)."
         )
     excl_rows.append(["WLAN-Probleme zum Router", wlan_note])
     excl_rows.append([
         "Eigener Router-Neustart statt Anbieterstörung",
         "Das Router-Protokoll wird nach providerseitigen Symptomen klassifiziert "
-        "(PPPoE-/LCP-Fehler, gescheiterte Anmeldung, PPP-Timeout, Kapitel 3); ein manueller "
+        f"(PPPoE-/LCP-Fehler, gescheiterte Anmeldung, PPP-Timeout, Kapitel {ch['router']}); ein manueller "
         "Neustart erzeugt andere Meldungen und wird hier nicht mitgezählt.",
     ])
     excl_rows.append([
@@ -944,7 +1019,7 @@ def generate_provider_report(db: Database, cfg: AppConfig, output_dir: Path,
     csv_files["ausfaelle"] = ev_csv
 
     log_csv = output_dir / f"netwatch_fritzbox_log_{ts}.csv"
-    all_log = db.get_fritzbox_log(limit=5000)
+    all_log = a["router_log"]["rows"]  # Messzeitraum, ohne VPN-Meldungen
     with log_csv.open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["timestamp", "category", "sync_down_kbps", "sync_up_kbps",

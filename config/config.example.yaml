@@ -136,6 +136,8 @@ reports:
   output_dir: "reports"
   auto_generate: true
   generate_time: "06:00"   # HH:MM
+  # Provider-Nachweis: Kapitel mit den Verkabelungs-Hinweisen der FritzBox anzeigen
+  provider_show_cabling: true
 
 notifications:
   telegram:

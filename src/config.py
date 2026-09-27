@@ -147,6 +147,8 @@ class ReportsConfig:
     output_dir: str = "reports"
     auto_generate: bool = True
     generate_time: str = "06:00"
+    # Provider report: show the chapter with the router's cabling hints (FritzBox "unzulässige Verkabelung").
+    provider_show_cabling: bool = True
 
 
 @dataclass
@@ -369,6 +371,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         output_dir=rp.get("output_dir", "reports"),
         auto_generate=rp.get("auto_generate", True),
         generate_time=rp.get("generate_time", "06:00"),
+        provider_show_cabling=bool(rp.get("provider_show_cabling", True)),
     )
 
     # --- notifications ---
