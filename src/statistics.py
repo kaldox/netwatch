@@ -59,6 +59,28 @@ class MonthlyStats:
 
 SECONDS_PER_DAY = 86_400.0
 
+# A pause in the measurements longer than this means NetWatch was not running
+# (restart, reboot, power cut) – used to end events that a restart left open.
+STALE_GAP_SECONDS = 120.0
+
+
+def stale_event_end(started_at: str, timestamps: list[str],
+                    max_gap_s: float = STALE_GAP_SECONDS) -> str:
+    """End time for an event left open by a restart: the last measurement
+    before the first gap in the measurement series after the event started
+    (= the last moment NetWatch observed the outage). Falls back to the start
+    when nothing was measured afterwards."""
+    start = datetime.fromisoformat(started_at)
+    last, last_s = start, started_at
+    for ts in timestamps:
+        t = datetime.fromisoformat(ts)
+        if t < start:
+            continue
+        if (t - last).total_seconds() > max_gap_s:
+            break
+        last, last_s = t, ts
+    return last_s
+
 
 def compute_daily_stats(
     events: list[dict[str, Any]],

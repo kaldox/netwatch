@@ -8,6 +8,7 @@ der Version.
 
 | Version | Datum | Das Wichtigste |
 |---|---|---|
+| [1.6.1](#161--2026-10-02) | 2026-10-02 | Ausfälle, die ein Neustart offen liess, werden beim Start geschlossen – keine falschen Ausfallzeiten bis Mitternacht mehr |
 | [1.6.0](#160--2026-09-27) | 2026-09-27 | Provider-Nachweis korrigiert: Router-Belege aus dem Protokoll, nur der Messzeitraum, keine VPN-Meldungen |
 | [1.5.0](#150--2026-09-24) | 2026-09-24 | IP-Wechsel korrekt gezählt, keine Messlücken mehr durch die IP-Abfrage, Telegram-Meldung nach Ausfall, schlankere Datenbank |
 | [1.4.0](#140--2026-09-02) | 2026-09-02 | Export-Button im Dashboard, Fazit auf Seite 1 des Provider-Nachweises, Ausfälle des laufenden Tages werden mitgezählt |
@@ -17,6 +18,17 @@ der Version.
 | [1.0.0](#100--2026-06-22) | 2026-06-22 | Erste Version |
 
 ## [Unreleased]
+
+## [1.6.1] – 2026-10-02
+
+### Behoben
+- **Ausfälle blieben nach einem Neustart für immer offen.** Offene Ereignisse hält der Classifier
+  nur im Speicher; wurde NetWatch oder der Pi während eines Ausfalls neu gestartet, schloss sie
+  niemand mehr. Die Tagesstatistik zählte sie bis Mitternacht (UTC) als Ausfallzeit – am
+  01.10.2026 machten zwei lokale Ausfälle während eines Umbaus so aus wenigen Minuten 443 Minuten,
+  und der Status stand dauerhaft auf „PROBLEM“. Beim Start werden solche Ereignisse jetzt mit der
+  letzten Messung vor der Neustart-Lücke beendet (Vermerk `closed_after_restart` im Ereignis) und
+  die Tagesstatistik der betroffenen Tage neu berechnet.
 
 ## [1.6.0] – 2026-09-27
 
@@ -212,7 +224,8 @@ der Version.
 - systemd-Dienst mit `install.sh`
 - Optionale Benachrichtigung per Telegram oder E-Mail
 
-[Unreleased]: https://github.com/kaldox/netwatch/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/kaldox/netwatch/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/kaldox/netwatch/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/kaldox/netwatch/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/kaldox/netwatch/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/kaldox/netwatch/compare/v1.3.0...v1.4.0

@@ -32,7 +32,7 @@ from src.notifier import Notifier
 from src.reports import generate_monthly_report
 from src.resources import sample_resources
 from src.speedtest import run_speedtest
-from src.statistics import compute_daily_stats, compute_monthly_stats
+from src.statistics import compute_daily_stats, compute_monthly_stats, stale_event_end
 from src.storage import export_events_csv, setup_logging, write_evidence_file
 from src.traceroute import run_diagnostics
 
@@ -431,6 +431,34 @@ class NetWatch:
     # Daily statistics
     # ------------------------------------------------------------------
 
+    def _close_stale_events(self, boot: datetime) -> None:
+        """Events still open at startup were left behind by a restart: the
+        classifier keeps open events only in memory, so nothing would ever close
+        them and the daily statistics would count them as downtime until
+        midnight. End each at the last measurement before the restart gap and
+        recompute the daily statistics of the affected days."""
+        days: set[date] = set()
+        for ev in self.db.get_open_events():
+            try:
+                start = datetime.fromisoformat(ev["started_at"])
+                window_end = min(start + timedelta(hours=12), boot)
+                stamps = self.db.get_measurement_timestamps(ev["started_at"], window_end.isoformat())
+                end_s = stale_event_end(ev["started_at"], stamps)
+                duration = (datetime.fromisoformat(end_s) - start).total_seconds()
+                self.db.close_stale_event(
+                    ev["event_id"], end_s, duration,
+                    "beim Start %s geschlossen (letzte Messung vor der Lücke)" % boot.isoformat(timespec="seconds"))
+                logger.warning("Stale %s from %s closed at %s (%.0fs) after restart",
+                               ev["event_type"], ev["started_at"], end_s, duration)
+                d = start.astimezone(timezone.utc).date()
+                while d <= date.today():
+                    days.add(d)
+                    d += timedelta(days=1)
+            except Exception as exc:
+                logger.error("Could not close stale event %s: %s", ev.get("event_id"), exc)
+        for d in sorted(days):
+            self._compute_and_store_daily_stats(d)
+
     def _compute_daily_stats_if_needed(self) -> None:
         today = date.today()
         yesterday = today - timedelta(days=1)
@@ -795,6 +823,12 @@ class NetWatch:
 
         signal.signal(signal.SIGTERM, _handle_signal)
         signal.signal(signal.SIGINT, _handle_signal)
+
+        # Before the first measurement: close events a previous run left open.
+        try:
+            self._close_stale_events(datetime.now(timezone.utc))
+        except Exception as exc:
+            logger.error("Closing stale events failed: %s", exc, exc_info=True)
 
         self._start_dashboard()
         self._start_speedtest_loop()

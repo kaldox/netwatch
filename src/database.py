@@ -755,6 +755,35 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_measurement_timestamps(self, start: str, end: str) -> list[str]:
+        """Distinct measurement timestamps in [start, end), ascending."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT timestamp FROM measurements "
+                "WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp",
+                (start, end),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def close_stale_event(
+        self, event_id: str, ended_at: str, duration_seconds: float, note: str
+    ) -> None:
+        """Close an event left open by a restart; records why in extra_json."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT extra_json FROM events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+            try:
+                extra = json.loads(row[0]) if row and row[0] else {}
+            except (TypeError, ValueError):
+                extra = {}
+            extra["closed_after_restart"] = note
+            conn.execute(
+                "UPDATE events SET ended_at=?, duration_seconds=?, extra_json=? "
+                "WHERE event_id=? AND ended_at IS NULL",
+                (ended_at, duration_seconds, json.dumps(extra), event_id),
+            )
+
     # ------------------------------------------------------------------
     # System resources (CPU/RAM/load/temp samples)
     # ------------------------------------------------------------------
