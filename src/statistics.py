@@ -60,8 +60,17 @@ class MonthlyStats:
 SECONDS_PER_DAY = 86_400.0
 
 # A pause in the measurements longer than this means NetWatch was not running
-# (restart, reboot, power cut) – used to end events that a restart left open.
-STALE_GAP_SECONDS = 120.0
+# (restart, reboot, power cut). Fallback for events without a clear recovery
+# signal; a Pi reboot leaves gaps of only ~60 s, the measurement cycle is ~5 s.
+STALE_GAP_SECONDS = 30.0
+
+# Which measurement shows that an outage of this type is over.
+RECOVERY_TARGET_TYPE = {
+    "LOCAL_NETWORK_FAILURE": "gateway",
+    "ISP_FAILURE": "icmp",
+    "ROUTING_FAILURE": "icmp",
+    "DNS_FAILURE": "dns",
+}
 
 
 def stale_event_end(started_at: str, timestamps: list[str],

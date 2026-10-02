@@ -32,7 +32,7 @@ from src.notifier import Notifier
 from src.reports import generate_monthly_report
 from src.resources import sample_resources
 from src.speedtest import run_speedtest
-from src.statistics import compute_daily_stats, compute_monthly_stats, stale_event_end
+from src.statistics import RECOVERY_TARGET_TYPE, compute_daily_stats, compute_monthly_stats, stale_event_end
 from src.storage import export_events_csv, setup_logging, write_evidence_file
 from src.traceroute import run_diagnostics
 
@@ -441,13 +441,21 @@ class NetWatch:
         for ev in self.db.get_open_events():
             try:
                 start = datetime.fromisoformat(ev["started_at"])
-                window_end = min(start + timedelta(hours=12), boot)
-                stamps = self.db.get_measurement_timestamps(ev["started_at"], window_end.isoformat())
-                end_s = stale_event_end(ev["started_at"], stamps)
+                window_end = min(start + timedelta(hours=12), boot).isoformat()
+                # Preferably the first measurement that shows the outage is over
+                # (gateway / external IPs / DNS reachable again) …
+                end_s, how = None, "erste Messung mit Verbindung"
+                ttype = RECOVERY_TARGET_TYPE.get(ev["event_type"])
+                if ttype:
+                    end_s = self.db.first_recovery(ev["started_at"], window_end, ttype)
+                # … otherwise the last measurement before the restart gap.
+                if end_s is None:
+                    stamps = self.db.get_measurement_timestamps(ev["started_at"], window_end)
+                    end_s, how = stale_event_end(ev["started_at"], stamps), "letzte Messung vor der Lücke"
                 duration = (datetime.fromisoformat(end_s) - start).total_seconds()
                 self.db.close_stale_event(
                     ev["event_id"], end_s, duration,
-                    "beim Start %s geschlossen (letzte Messung vor der Lücke)" % boot.isoformat(timespec="seconds"))
+                    "beim Start %s geschlossen (%s)" % (boot.isoformat(timespec="seconds"), how))
                 logger.warning("Stale %s from %s closed at %s (%.0fs) after restart",
                                ev["event_type"], ev["started_at"], end_s, duration)
                 d = start.astimezone(timezone.utc).date()

@@ -8,6 +8,7 @@ der Version.
 
 | Version | Datum | Das Wichtigste |
 |---|---|---|
+| [1.6.2](#162--2026-10-02) | 2026-10-02 | Offene Ausfälle enden bei der ersten Messung mit Verbindung (1.6.1 schloss sie bei kurzen Neustarts zu spät) |
 | [1.6.1](#161--2026-10-02) | 2026-10-02 | Ausfälle, die ein Neustart offen liess, werden beim Start geschlossen – keine falschen Ausfallzeiten bis Mitternacht mehr |
 | [1.6.0](#160--2026-09-27) | 2026-09-27 | Provider-Nachweis korrigiert: Router-Belege aus dem Protokoll, nur der Messzeitraum, keine VPN-Meldungen |
 | [1.5.0](#150--2026-09-24) | 2026-09-24 | IP-Wechsel korrekt gezählt, keine Messlücken mehr durch die IP-Abfrage, Telegram-Meldung nach Ausfall, schlankere Datenbank |
@@ -18,6 +19,16 @@ der Version.
 | [1.0.0](#100--2026-06-22) | 2026-06-22 | Erste Version |
 
 ## [Unreleased]
+
+## [1.6.2] – 2026-10-02
+
+### Behoben
+- **1.6.1 schloss offene Ausfälle viel zu spät.** Als Ende galt die letzte Messung vor einer
+  Messlücke von über 2 Minuten – ein Pi-Neustart hinterlässt aber nur rund eine Minute Lücke, also
+  lief die Suche bis zur 12-Stunden-Grenze. Jetzt endet ein Ausfall bei der **ersten Messung, die
+  wieder Verbindung zeigt** (lokaler Ausfall: Gateway erreichbar; Provider-Ausfall: externe IPs;
+  DNS-Ausfall: DNS-Ziele). Nur für Ereignisse ohne solches Signal (Paketverlust, Latenz) gilt die
+  Lücken-Regel, jetzt mit 30 Sekunden. Test mit dem Ablauf vom 01.10.2026 ergänzt.
 
 ## [1.6.1] – 2026-10-02
 
@@ -224,7 +235,8 @@ der Version.
 - systemd-Dienst mit `install.sh`
 - Optionale Benachrichtigung per Telegram oder E-Mail
 
-[Unreleased]: https://github.com/kaldox/netwatch/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/kaldox/netwatch/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/kaldox/netwatch/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/kaldox/netwatch/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/kaldox/netwatch/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/kaldox/netwatch/compare/v1.4.0...v1.5.0

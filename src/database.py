@@ -765,6 +765,16 @@ class Database:
             ).fetchall()
         return [r[0] for r in rows]
 
+    def first_recovery(self, start: str, end: str, target_type: str) -> Optional[str]:
+        """First measurement in [start, end) where a target of this type is reachable again."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT MIN(timestamp) FROM measurements "
+                "WHERE timestamp >= ? AND timestamp < ? AND target_type = ? AND reachable = 1",
+                (start, end, target_type),
+            ).fetchone()
+        return row[0] if row and row[0] else None
+
     def close_stale_event(
         self, event_id: str, ended_at: str, duration_seconds: float, note: str
     ) -> None:
