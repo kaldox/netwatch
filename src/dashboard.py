@@ -182,7 +182,8 @@ def create_app(db: Database, cfg: AppConfig) -> Flask:
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         now = datetime.now(timezone.utc).isoformat()
         rows = db.get_measurements_range(start=since, end=now, target_name=target)
-        labels = [r["timestamp"][:16] for r in rows]
+        # Full UTC ISO timestamps; the dashboard converts them to local time (Europe/Zurich).
+        labels = [r["timestamp"] for r in rows]
         latencies = [r["latency_ms"] for r in rows]
         packet_loss = [r["packet_loss_percent"] for r in rows]
         return jsonify(

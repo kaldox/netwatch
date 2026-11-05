@@ -582,6 +582,12 @@ canvas{max-width:100%}
 <!-- ══════════════ DAILY ══════════════ -->
 <div id="page-daily" class="page">
   <div class="section-hd"><h2>Tagesstatistik</h2></div>
+  <div style="color:var(--text2);font-size:12px;line-height:1.5;margin:-8px 0 14px">
+    Hinweis: Ein Tag zählt hier nach UTC von 00:00 bis 24:00 – das ist bei uns
+    01:00 bis 01:00 Uhr (Winterzeit) bzw. 02:00 bis 02:00 Uhr (Sommerzeit).
+    Ein Ausfall kurz nach Mitternacht steht deshalb noch beim Vortag.
+    Alle anderen Zeiten im Dashboard sind Schweizer Ortszeit.
+  </div>
   <div class="card" style="margin-bottom:16px">
     <div class="spark-wrap" style="height:180px"><canvas id="chart-daily-avail"></canvas></div>
   </div>
@@ -621,9 +627,42 @@ function loadPageData(n) {
 }
 
 // ── Helpers ──
+// The database stores every timestamp as UTC ISO string ("…T19:32:51+00:00"). Never cut
+// these strings for display – always convert to Swiss local time (CET/CEST switch included).
+const TZ = 'Europe/Zurich';
+const _tzFmt = new Intl.DateTimeFormat('de-CH', {
+  timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+function parseTs(ts) {
+  if (!ts) return null;
+  let s = String(ts).trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
+  // No offset given → it is UTC as well; never let the browser treat it as its own local time.
+  if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s += 'Z';
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+function tzParts(ts) {
+  const d = parseTs(ts);
+  if (!d) return null;
+  const p = {};
+  _tzFmt.formatToParts(d).forEach(x => { p[x.type] = x.value; });
+  return p;
+}
+// Full local date + time, e.g. "05.11.2026 20:32"
 function fmtTs(ts) {
-  if (!ts) return '–';
-  return ts.substring(0,16).replace('T', ' ');
+  const p = tzParts(ts);
+  return p ? `${p.day}.${p.month}.${p.year} ${p.hour}:${p.minute}` : '–';
+}
+// Short label for chart axes, e.g. "05.11. 20:32"
+function fmtAxis(ts) {
+  const p = tzParts(ts);
+  return p ? `${p.day}.${p.month}. ${p.hour}:${p.minute}` : '';
+}
+// Local hour of day (0–23)
+function tzHour(ts) {
+  const p = tzParts(ts);
+  return p ? parseInt(p.hour, 10) : null;
 }
 function fmtAvail(pct) {
   if (pct === null || pct === undefined) return '–';
@@ -767,7 +806,7 @@ async function loadOverview() {
   // Mini latency chart
   await buildLatencyMini('chart-latency-overview', 'Cloudflare DNS', 2);
   document.getElementById('last-updated').textContent =
-    'Aktualisiert ' + new Date().toLocaleTimeString('de-CH');
+    'Aktualisiert ' + new Date().toLocaleTimeString('de-CH', { timeZone: TZ });
 }
 
 async function buildLatencyMini(id, target, hours) {
@@ -783,7 +822,7 @@ async function buildLatencyMini(id, target, hours) {
   charts[id] = new Chart(canvas, {
     type: 'line',
     data: {
-      labels: data.labels,
+      labels: data.labels.map(fmtAxis),
       datasets: [{
         label: 'Latenz ms',
         data: data.latency_ms,
@@ -814,6 +853,7 @@ async function loadLatencyChart() {
   const hours  = document.getElementById('lat-hours')?.value || 24;
   const data = await fetch(`/api/latency_chart?target=${encodeURIComponent(target)}&hours=${hours}`)
     .then(r=>r.json()).catch(()=>({labels:[],latency_ms:[],packet_loss_percent:[]}));
+  const labels = data.labels.map(fmtAxis);
 
   const makeCtxGrad = (id, r, g, b) => {
     const c = document.getElementById(id);
@@ -839,7 +879,7 @@ async function loadLatencyChart() {
     if (charts['chart-latency']) charts['chart-latency'].destroy();
     charts['chart-latency'] = new Chart(canvas1, {
       type:'line', data:{
-        labels: data.labels,
+        labels,
         datasets:[{ label:`Latenz · ${target}`, data:data.latency_ms,
           borderColor:'#00D4FF', backgroundColor:makeCtxGrad('chart-latency',0,212,255),
           borderWidth:1.5, pointRadius:0, tension:0.3, fill:true }]
@@ -852,7 +892,7 @@ async function loadLatencyChart() {
     if (charts['chart-jitter']) charts['chart-jitter'].destroy();
     charts['chart-jitter'] = new Chart(canvas2, {
       type:'line', data:{
-        labels: data.labels,
+        labels,
         datasets:[{ label:'Paketverlust %', data:data.packet_loss_percent,
           borderColor:'#FF9F43', backgroundColor:makeCtxGrad('chart-jitter',255,159,67),
           borderWidth:1.5, pointRadius:0, tension:0.3, fill:true }]
@@ -1050,7 +1090,7 @@ async function loadSpeedChart() {
 
     charts['chart-speed'] = new Chart(canvas, {
       type: 'line',
-      data: { labels: sorted.map(r => r.timestamp.substring(0,16).replace('T',' ')), datasets },
+      data: { labels: sorted.map(r => fmtAxis(r.timestamp)), datasets },
       options: {
         responsive:true, maintainAspectRatio:false, animation:{duration:400},
         plugins:{ legend:{ labels:{color:'#6B7E95',boxWidth:10,font:{size:11}} } },
@@ -1068,7 +1108,8 @@ async function loadSpeedChart() {
   // measurement across all collected days into its hour-of-day bucket.
   const hourBuckets = Array.from({length:24}, () => ({down:[], up:[]}));
   sorted.forEach(r => {
-    const hour = new Date(r.timestamp).getHours();
+    const hour = tzHour(r.timestamp);
+    if (hour === null) return;
     if (r.download_mbps != null) hourBuckets[hour].down.push(r.download_mbps);
     if (r.upload_mbps != null) hourBuckets[hour].up.push(r.upload_mbps);
   });
@@ -1132,7 +1173,7 @@ async function loadPacketLossChart() {
   if (charts['chart-packetloss']) charts['chart-packetloss'].destroy();
   charts['chart-packetloss'] = new Chart(canvas, {
     type:'bar',
-    data:{ labels:data.labels, datasets:[{
+    data:{ labels:data.labels.map(fmtAxis), datasets:[{
       label:'Paketverlust %',
       data:data.packet_loss_percent,
       backgroundColor: data.packet_loss_percent.map(v =>
@@ -1301,7 +1342,7 @@ async function loadDailyStats() {
     charts['chart-daily-avail'] = new Chart(canvas, {
       type:'bar',
       data:{ labels:sorted.map(r=>r.date_str), datasets:[{
-        label:'Verfügbarkeit %',
+        label:'Verfügbarkeit % (Tag nach UTC)',
         data:sorted.map(r=>r.availability_percent),
         backgroundColor:sorted.map(r=>
           r.availability_percent>=99.9?'rgba(0,255,136,.6)':
@@ -1333,7 +1374,7 @@ async function loadDailyStats() {
     </tr>`).join('');
   document.getElementById('daily-table').innerHTML =
     `<table><thead><tr>
-      <th>Datum</th><th>Verfügb.</th><th>Ausfälle</th>
+      <th title="Kalendertag nach UTC (01:00/02:00 bis 01:00/02:00 Uhr Ortszeit)">Tag (UTC)</th><th>Verfügb.</th><th>Ausfälle</th>
       <th>ISP</th><th>Lokal</th><th>DNS</th>
       <th>Ø Latenz</th><th>Max Latenz</th><th>Ø Verlust</th>
     </tr></thead><tbody>${trs}</tbody></table>`;

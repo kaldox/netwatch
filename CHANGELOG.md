@@ -8,6 +8,7 @@ der Version.
 
 | Version | Datum | Das Wichtigste |
 |---|---|---|
+| [1.7.1](#171--2026-11-05) | 2026-11-05 | Dashboard zeigt alle Zeiten in Schweizer Ortszeit statt UTC; Tagesstatistik als UTC-Tage beschriftet |
 | [1.7.0](#170--2026-11-05) | 2026-11-05 | Router-Störungen (Stecker, Kabel, Neustart) zählen nicht mehr als Provider-Ausfall – auch rückwirkend |
 | [1.6.2](#162--2026-10-02) | 2026-10-02 | Offene Ausfälle enden bei der ersten Messung mit Verbindung (1.6.1 schloss sie bei kurzen Neustarts zu spät) |
 | [1.6.1](#161--2026-10-02) | 2026-10-02 | Ausfälle, die ein Neustart offen liess, werden beim Start geschlossen – keine falschen Ausfallzeiten bis Mitternacht mehr |
@@ -20,6 +21,28 @@ der Version.
 | [1.0.0](#100--2026-06-22) | 2026-06-22 | Erste Version |
 
 ## [Unreleased]
+
+## [1.7.1] – 2026-11-05
+
+### Behoben
+- **Dashboard zeigte UTC als Ortszeit.** Die Datenbank speichert alle Zeiten in UTC, das
+  Dashboard schnitt die Zeitstempel aber nur ab. Der ISP-Ausfall von 20:32 Uhr stand deshalb als
+  „19:32“ in der Liste – eine Stunde daneben (im Sommer zwei). Jetzt rechnet der Browser jede
+  Zeit in Schweizer Ortszeit um (Europe/Zurich, Sommer-/Winterzeit automatisch), egal in welcher
+  Zeitzone das anzeigende Gerät steht: Ereignisliste, letzte Ereignisse, ISP-Seite, Speedtest
+  („Gemessen …“ und Tabelle), Traceroutes, IP-Historie, „Aktualisiert …“ sowie die Achsen aller
+  Verlaufsdiagramme. Neues Format: `05.11.2026 20:32`, auf Diagrammachsen `05.11. 20:32`.
+- **„Geschwindigkeit nach Tageszeit“** ordnet die Messungen nach der Schweizer Stunde ein, nicht
+  mehr nach der Zeitzone des Browsers.
+- `/api/latency_chart` liefert die Zeitstempel jetzt vollständig mit Offset (`…+00:00`) statt
+  abgeschnitten auf `YYYY-MM-DDTHH:MM`; die Umrechnung macht das Dashboard.
+
+### Geändert
+- **Tagesstatistik ehrlich beschriftet.** Die Tage werden weiterhin nach UTC gerechnet (00:00–24:00
+  UTC = 01:00–01:00 Uhr Winterzeit, 02:00–02:00 Uhr Sommerzeit). Die Spalte heisst jetzt „Tag (UTC)“,
+  ein Hinweis über dem Diagramm erklärt, dass ein Ausfall kurz nach Mitternacht beim Vortag steht.
+- Tests: `tests/test_dashboard_times.py` prüft die vollständigen API-Zeitstempel und dass das
+  Template umrechnet statt abschneidet.
 
 ## [1.7.0] – 2026-11-05
 
