@@ -8,6 +8,7 @@ der Version.
 
 | Version | Datum | Das Wichtigste |
 |---|---|---|
+| [1.7.0](#170--2026-11-05) | 2026-11-05 | Router-Störungen (Stecker, Kabel, Neustart) zählen nicht mehr als Provider-Ausfall – auch rückwirkend |
 | [1.6.2](#162--2026-10-02) | 2026-10-02 | Offene Ausfälle enden bei der ersten Messung mit Verbindung (1.6.1 schloss sie bei kurzen Neustarts zu spät) |
 | [1.6.1](#161--2026-10-02) | 2026-10-02 | Ausfälle, die ein Neustart offen liess, werden beim Start geschlossen – keine falschen Ausfallzeiten bis Mitternacht mehr |
 | [1.6.0](#160--2026-09-27) | 2026-09-27 | Provider-Nachweis korrigiert: Router-Belege aus dem Protokoll, nur der Messzeitraum, keine VPN-Meldungen |
@@ -19,6 +20,30 @@ der Version.
 | [1.0.0](#100--2026-06-22) | 2026-06-22 | Erste Version |
 
 ## [Unreleased]
+
+## [1.7.0] – 2026-11-05
+
+### Behoben
+- **Router-Störungen wurden als Provider-Ausfall gezählt.** Am 05.11.2026 stiess jemand an den
+  Router, danach wurde er per Netzstecker neu gestartet. NetWatch zählte beides als ISP-Ausfall,
+  denn es sah „Router erreichbar, Internet nicht“ – genau so sieht es aber auch aus, wenn die
+  DSL-Leitung nach einem Stoss oder Neustart neu synchronisiert. Neu gilt: War der Router selbst
+  in den **60 Sekunden vor** dem Internet-Ausfall nicht erreichbar (oder endete gerade ein lokaler
+  Ausfall) und dauert der Ausfall **höchstens 5 Minuten**, ist es eine **Störung am Router**
+  (Typ „Lokal“), kein Provider-Ausfall. Bei einem echten Provider-Ausfall bleibt der Router
+  durchgehend erreichbar. Länger als 5 Minuten bleibt es ein Provider-Ausfall (z. B. Router
+  während eines echten Ausfalls neu gestartet, Internet danach immer noch weg).
+- **Erkennung in Echtzeit und rückwirkend.** Der Classifier stuft neue Fälle sofort richtig ein
+  (die Telegram-Meldung stimmt also schon). Beim Start und alle ~8 Minuten prüft NetWatch
+  zusätzlich alle alten ISP-Ausfälle anhand der gespeicherten Messungen und korrigiert sie; die
+  Tagesstatistik der betroffenen Tage wird neu berechnet. Ursprünglicher Typ, Beschreibung und
+  Begründung bleiben in `extra_json` erhalten.
+- **Kein 10-Sekunden-„ISP-Ausfall“ mehr nach jedem kurzen lokalen Ausfall.** Die externen Ziele
+  galten erst nach drei erfolgreichen Messungen als erholt; kam das Gateway zurück, war das
+  Internet oft sofort wieder da, aber NetWatch meldete noch ~10 s „ISP-Ausfall“. Ein
+  Provider-Ausfall beginnt jetzt nur, wenn in der aktuellen Messung wirklich kein externes Ziel
+  antwortet. Sechs solche Geister-Ereignisse (22.09.–01.11.2026) korrigiert die Rückwirkung.
+- Datenbank: `upsert_event` übernimmt beim Aktualisieren auch den Ereignistyp.
 
 ## [1.6.2] – 2026-10-02
 
@@ -235,7 +260,8 @@ der Version.
 - systemd-Dienst mit `install.sh`
 - Optionale Benachrichtigung per Telegram oder E-Mail
 
-[Unreleased]: https://github.com/kaldox/netwatch/compare/v1.6.2...HEAD
+[Unreleased]: https://github.com/kaldox/netwatch/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/kaldox/netwatch/compare/v1.6.2...v1.7.0
 [1.6.2]: https://github.com/kaldox/netwatch/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/kaldox/netwatch/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/kaldox/netwatch/compare/v1.5.0...v1.6.0

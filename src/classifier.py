@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Optional
 
 from .monitor import MeasurementResult
+from .router_fault import ROUTER_FAULT_DESCRIPTION, ROUTER_FAULT_MAX_S, ROUTER_FAULT_WINDOW_S
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,8 @@ class Classifier:
     Classification logic:
     - ALL local targets down            → LOCAL_NETWORK_FAILURE (confidence 0.95)
     - Gateway up, external IPs down     → ISP_FAILURE (confidence 0.90)
+      … but the gateway itself was down shortly before → router fault,
+        stored as LOCAL_NETWORK_FAILURE (see router_fault.py)
     - External IPs up, DNS fails        → DNS_FAILURE (confidence 0.90)
     - Partial external reachability     → ROUTING_FAILURE (confidence 0.70)
     - Latency above threshold           → LATENCY_DEGRADATION (confidence 0.80)
@@ -146,12 +149,16 @@ class Classifier:
         latency_critical_ms: float = 500.0,
         packet_loss_critical_percent: float = 20.0,
         min_affected_targets: int = 2,
+        router_fault_window_s: float = ROUTER_FAULT_WINDOW_S,
+        router_fault_max_s: float = ROUTER_FAULT_MAX_S,
     ) -> None:
         self.failure_threshold = failure_threshold
         self.recovery_threshold = recovery_threshold
         self.latency_critical_ms = latency_critical_ms
         self.packet_loss_critical_percent = packet_loss_critical_percent
         self.min_affected_targets = min_affected_targets
+        self.router_fault_window_s = router_fault_window_s
+        self.router_fault_max_s = router_fault_max_s
 
         # Per-target state machines
         self._target_states: dict[str, TargetState] = {}
@@ -165,6 +172,8 @@ class Classifier:
         self._network_interface: Optional[str] = None
         self._hostname: str = socket.gethostname()
         self._gateway_fail_streak: int = 0
+        # Times of recent cycles with the gateway unreachable (router-fault check)
+        self._gateway_failures: list[datetime] = []
 
     # ------------------------------------------------------------------
 
@@ -179,8 +188,11 @@ class Classifier:
         self._gateway_ip = gw
         self._network_interface = iface
 
+    def _clock(self) -> datetime:
+        return datetime.now(timezone.utc)
+
     def _now(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return self._clock().isoformat()
 
     def _make_event(
         self,
@@ -257,10 +269,14 @@ class Classifier:
         # gateway ping (brief ICMP rate-limiting / hiccup) must not raise a
         # false LOCAL_NETWORK_FAILURE — a real local outage persists across
         # several cycles, exactly like the ISP-failure detection.
+        now_dt = self._clock()
         if gateway_reachable:
             self._gateway_fail_streak = 0
         else:
             self._gateway_fail_streak += 1
+            self._gateway_failures.append(now_dt)
+        cutoff = now_dt.timestamp() - self.router_fault_window_s
+        self._gateway_failures = [t for t in self._gateway_failures if t.timestamp() >= cutoff]
         local_failing = self._gateway_fail_streak >= self.failure_threshold
 
         public_ip_failing_count = sum(
@@ -278,6 +294,12 @@ class Classifier:
         all_public_ips_failing = (
             public_ip_total > 0 and public_ip_failing_count == public_ip_total
         )
+        # The per-target state machines need `recovery_threshold` successes to
+        # leave the failure state. Right after a local outage the targets are
+        # often reachable again already while their state still says "failing"
+        # — without this check that lag produced a ~10 s ISP_FAILURE after
+        # every short local outage although the line was fine.
+        any_public_ip_reachable_now = any(r.reachable for r in public_ip_results)
         partial_public_ip_failure = (
             0 < public_ip_failing_count < public_ip_total
         )
@@ -304,24 +326,48 @@ class Classifier:
                 changed_events.append(ev)
 
         # ---- ISP FAILURE ---------------------------------------------
+        # Key stays ISP_FAILURE even when the event is stored as a router fault
+        # (event_type LOCAL_NETWORK_FAILURE), so opening/closing works as usual.
         type_key = EventType.ISP_FAILURE.value
         if gateway_reachable and all_public_ips_failing:
-            if type_key not in self.active_events:
-                ev = self._make_event(
-                    EventType.ISP_FAILURE,
-                    confidence=0.90,
-                    description=(
-                        f"Gateway erreichbar, aber alle {public_ip_total} "
-                        f"externen Ziele nicht erreichbar – ISP-Ausfall wahrscheinlich"
-                    ),
-                    current_ipv4=current_ipv4,
-                    current_ipv6=current_ipv6,
-                    extra={"public_ip_failing": public_ip_failing_count,
-                           "public_ip_total": public_ip_total},
+            if type_key not in self.active_events and not any_public_ip_reachable_now:
+                isp_description = (
+                    f"Gateway erreichbar, aber alle {public_ip_total} "
+                    f"externen Ziele nicht erreichbar – ISP-Ausfall wahrscheinlich"
                 )
+                extra = {"public_ip_failing": public_ip_failing_count,
+                         "public_ip_total": public_ip_total}
+                if self._gateway_failures:
+                    fails = self._gateway_failures
+                    extra.update({
+                        "router_fault": (
+                            f"Router {len(fails)}× nicht erreichbar zwischen "
+                            f"{fails[0].isoformat()[11:19]} und {fails[-1].isoformat()[11:19]} UTC"
+                        ),
+                        "router_fault_detected": "in Echtzeit",
+                        "original_event_type": EventType.ISP_FAILURE.value,
+                        "original_description": isp_description,
+                    })
+                    ev = self._make_event(
+                        EventType.LOCAL_NETWORK_FAILURE,
+                        confidence=0.85,
+                        description=ROUTER_FAULT_DESCRIPTION,
+                        current_ipv4=current_ipv4,
+                        current_ipv6=current_ipv6,
+                        extra=extra,
+                    )
+                else:
+                    ev = self._make_event(
+                        EventType.ISP_FAILURE,
+                        confidence=0.90,
+                        description=isp_description,
+                        current_ipv4=current_ipv4,
+                        current_ipv6=current_ipv6,
+                        extra=extra,
+                    )
                 self.active_events[type_key] = ev
                 changed_events.append(ev)
-            else:
+            elif type_key in self.active_events:
                 # Update during-IP
                 self.active_events[type_key].public_ipv4_during = current_ipv4
                 self.active_events[type_key].public_ipv6_during = current_ipv6
@@ -330,6 +376,7 @@ class Classifier:
                 ev = self._close_event(
                     self.active_events.pop(type_key), current_ipv4, current_ipv6
                 )
+                self._check_router_fault_duration(ev)
                 changed_events.append(ev)
 
         # ---- ROUTING FAILURE (partial external) ----------------------
@@ -445,6 +492,22 @@ class Classifier:
                 changed_events.append(ev)
 
         return changed_events
+
+    def _check_router_fault_duration(self, ev: NetworkEvent) -> None:
+        """A router fault lasts a few minutes at most (restart + DSL training +
+        dial-in). If the internet stayed away longer, it was a real provider
+        outage after all (e.g. router restarted during an outage) → revert."""
+        if ev.event_type != EventType.LOCAL_NETWORK_FAILURE or "router_fault" not in ev.extra:
+            return
+        dur = ev.duration_seconds
+        if dur is not None and dur > self.router_fault_max_s:
+            ev.event_type = EventType.ISP_FAILURE
+            ev.confidence_score = 0.90
+            ev.description = ev.extra.get("original_description") or ev.description
+            ev.extra["router_fault_rejected"] = (
+                f"Ausfall dauerte {dur:.0f} s (> {self.router_fault_max_s:.0f} s) – "
+                f"zu lang für eine Router-Störung, bleibt Provider-Ausfall"
+            )
 
     def get_active_events(self) -> list[NetworkEvent]:
         return list(self.active_events.values())

@@ -31,6 +31,7 @@ from src.monitor import NetworkMonitor, get_public_ip
 from src.notifier import Notifier
 from src.reports import generate_monthly_report
 from src.resources import sample_resources
+from src.router_fault import reclassify_history
 from src.speedtest import run_speedtest
 from src.statistics import RECOVERY_TARGET_TYPE, compute_daily_stats, compute_monthly_stats, stale_event_end
 from src.storage import export_events_csv, setup_logging, write_evidence_file
@@ -446,6 +447,8 @@ class NetWatch:
                 # (gateway / external IPs / DNS reachable again) …
                 end_s, how = None, "erste Messung mit Verbindung"
                 ttype = RECOVERY_TARGET_TYPE.get(ev["event_type"])
+                if "router_fault" in (ev.get("extra_json") or ""):
+                    ttype = "icmp"     # Router-Störung: vorbei, wenn das Internet wieder da ist
                 if ttype:
                     end_s = self.db.first_recovery(ev["started_at"], window_end, ttype)
                 # … otherwise the last measurement before the restart gap.
@@ -466,6 +469,16 @@ class NetWatch:
                 logger.error("Could not close stale event %s: %s", ev.get("event_id"), exc)
         for d in sorted(days):
             self._compute_and_store_daily_stats(d)
+
+    def _reclassify_router_faults(self) -> None:
+        """Correct old ISP_FAILURE events that were really router faults
+        (router restarted / bumped) and recompute the affected days."""
+        days = reclassify_history(self.db)
+        for d in sorted(days):
+            self._compute_and_store_daily_stats(d)
+        if days:
+            logger.info("Router-Störungen korrigiert, Statistik neu für %s",
+                        ", ".join(d.isoformat() for d in sorted(days)))
 
     def _compute_daily_stats_if_needed(self) -> None:
         today = date.today()
@@ -837,6 +850,10 @@ class NetWatch:
             self._close_stale_events(datetime.now(timezone.utc))
         except Exception as exc:
             logger.error("Closing stale events failed: %s", exc, exc_info=True)
+        try:
+            self._reclassify_router_faults()
+        except Exception as exc:
+            logger.error("Router-fault reclassification failed: %s", exc, exc_info=True)
 
         self._start_dashboard()
         self._start_speedtest_loop()
@@ -864,6 +881,7 @@ class NetWatch:
 
                 # Every ~100 cycles: maintenance tasks
                 if cycle % 100 == 0:
+                    self._reclassify_router_faults()
                     self._compute_daily_stats_if_needed()
                     self._maybe_generate_report()
 

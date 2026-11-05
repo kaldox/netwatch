@@ -686,13 +686,13 @@ class Database:
                 conn.execute(
                     """
                     UPDATE events SET
-                        ended_at=?, duration_seconds=?, confidence_score=?,
+                        event_type=?, ended_at=?, duration_seconds=?, confidence_score=?,
                         description=?, public_ipv4_during=?, public_ipv4_after=?,
                         public_ipv6_during=?, public_ipv6_after=?, extra_json=?
                     WHERE event_id=?
                     """,
                     (
-                        row.ended_at, row.duration_seconds, row.confidence_score,
+                        row.event_type, row.ended_at, row.duration_seconds, row.confidence_score,
                         row.description, row.public_ipv4_during, row.public_ipv4_after,
                         row.public_ipv6_during, row.public_ipv6_after,
                         row.extra_json, row.event_id,
@@ -792,6 +792,37 @@ class Database:
                 "UPDATE events SET ended_at=?, duration_seconds=?, extra_json=? "
                 "WHERE event_id=? AND ended_at IS NULL",
                 (ended_at, duration_seconds, json.dumps(extra), event_id),
+            )
+
+    def gateway_failures_between(self, start: str, end: str) -> list[str]:
+        """Measurement times in [start, end] at which the gateway was unreachable."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT timestamp FROM measurements "
+                "WHERE timestamp >= ? AND timestamp <= ? AND target_type = 'gateway' "
+                "AND gateway_reachable = 0 "
+                "ORDER BY timestamp",
+                (start, end),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def local_event_ends_between(self, start: str, end: str) -> list[str]:
+        """End times in [start, end] of LOCAL_NETWORK_FAILURE events."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT ended_at FROM events WHERE event_type = 'LOCAL_NETWORK_FAILURE' "
+                "AND ended_at IS NOT NULL AND ended_at >= ? AND ended_at <= ? ORDER BY ended_at",
+                (start, end),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def reclassify_event(self, event_id: str, event_type: str, description: str,
+                         extra_json: str) -> None:
+        """Change an event's type afterwards (e.g. router fault instead of ISP outage)."""
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE events SET event_type=?, description=?, extra_json=? WHERE event_id=?",
+                (event_type, description, extra_json, event_id),
             )
 
     # ------------------------------------------------------------------
